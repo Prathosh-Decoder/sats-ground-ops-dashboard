@@ -1,0 +1,17 @@
+# Raw data (too large for GitHub, not needed to run the app)
+/Data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Backup files
+*.bak
+
+# OS
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
