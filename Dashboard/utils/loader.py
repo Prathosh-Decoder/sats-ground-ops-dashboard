@@ -34,6 +34,12 @@ def load_data() -> pd.DataFrame:
         st.stop()
     df = pd.read_parquet(PARQUET_PATH)
 
+    # Drop raw array-valued columns — pandas/Streamlit can't hash these for
+    # caching, which forces an expensive whole-DataFrame pickle fallback on
+    # every cached call and can crash the app under memory pressure.
+    df = df.drop(columns=["changes", "identification_codeshare", "linkedFlight_transitPoints"],
+                 errors="ignore")
+
     # Ensure target column is present as string (for easy filtering)
     if "Target_Departure_Delay_Class" in df.columns:
         df["Target_Departure_Delay_Class"] = df["Target_Departure_Delay_Class"].astype(str)
