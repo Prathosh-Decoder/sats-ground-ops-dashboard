@@ -255,6 +255,47 @@ if st.session_state["selected_activity"]:
         icon=bu_info.get("icon", "🔧"), severity=_sev,
     )
 
+    # ── Pinpoint Table — exact flights where this activity ran late ──────────
+    st.divider()
+    st.markdown("#### 🎯 Pinpoint Table — Which Flights Were Affected")
+    st.caption(
+        f"Every flight where {act_name.split(': ')[-1]} ran late, worst first — "
+        "use this to trace specific cases for follow-up."
+    )
+    if delay_col in df.columns:
+        pin_df = df[df[delay_col] > 0].copy()
+        if not pin_df.empty:
+            if "identification_iata" in pin_df.columns:
+                pin_df["Flight"] = pin_df["identification_iata"]
+            if "departure_offBlock.scheduled" in pin_df.columns:
+                _psched = pd.to_datetime(pin_df["departure_offBlock.scheduled"], errors="coerce", utc=True)
+                pin_df["Date"] = _psched.dt.strftime("%Y-%m-%d")
+                pin_df["Dep Time"] = _psched.dt.strftime("%H:%M")
+            if "origin_terminal" in pin_df.columns:
+                pin_df["Terminal"] = pin_df["origin_terminal"].astype(str).replace({"2": "T2", "3": "T3"})
+            if "destination_iata" in pin_df.columns:
+                pin_df["Destination"] = pin_df["destination_iata"]
+            pin_df["This Activity (min)"] = pin_df[delay_col].round(1)
+            if "Target_Departure_Delay_mins" in pin_df.columns:
+                pin_df["Dep Delay (min)"] = pin_df["Target_Departure_Delay_mins"].round(1)
+
+            _show_cols = [c for c in ["Flight", "Date", "Dep Time", "Terminal", "Destination",
+                                      "This Activity (min)", "Dep Delay (min)"] if c in pin_df.columns]
+            pin_table = pin_df[_show_cols].sort_values("This Activity (min)", ascending=False)
+            st.dataframe(
+                pin_table.reset_index(drop=True),
+                use_container_width=True, hide_index=True, height=380,
+                column_config={
+                    "This Activity (min)": st.column_config.NumberColumn(format="%.1f"),
+                    "Dep Delay (min)":     st.column_config.NumberColumn(format="%.1f"),
+                },
+            )
+            st.caption(f"{len(pin_table):,} of {int(act_row['count']):,} flights had this activity running late.")
+        else:
+            st.info("No data")
+    else:
+        st.info("No data")
+
     if delay_col in df.columns:
         delay_series = df[delay_col].dropna()
         delay_clipped = delay_series.clip(-60, 120)
