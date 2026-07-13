@@ -1,5 +1,5 @@
 """
-pages/10_Ask_Data.py
+pages/11_Ask_Data.py
 Natural Language Analytics — ask any question in plain English.
 
 Supports three LLM providers (all free or near-free):
@@ -7,10 +7,14 @@ Supports three LLM providers (all free or near-free):
   • Gemini     — free 1500/day, aistudio.google.com (gemini-2.0-flash)
   • Anthropic  — pay-as-you-go, console.anthropic.com (claude-haiku-4-5)
 
-Two-pass architecture:
-  Pass 1 — LLM writes pandas/plotly code (sees schema, not raw data)
-  [code runs locally on the full dataset]
-  Pass 2 — aggregated result sent back → LLM writes a real text insight
+Three intent branches:
+  data     — Pass 1: LLM writes pandas/plotly code (sees schema, not raw data)
+             [code runs locally on the full dataset]
+             Pass 2: aggregated result sent back → LLM writes a real text insight
+  discuss  — follow-ups, concept questions, and app-navigation questions get a
+             pure conversational LLM answer grounded in prior turns + APP_GUIDE
+             (no code generation or execution)
+  chitchat — greetings get a canned intro reply (no LLM call)
 """
 import sys, os, re
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -160,6 +164,50 @@ CODE RULES:
 
 Return ONLY valid Python. No markdown fences."""
 
+# ── App knowledge — what every dashboard page does ────────────────────────────
+APP_GUIDE = """DASHBOARD PAGES (this assistant lives inside a multi-page Streamlit app;
+users navigate via the left sidebar):
+
+• Home — landing page: headline KPIs (flights analysed, on-time %, delayed %, avg delay)
+  and navigation tiles to every page, plus per-team on-time mini-cards.
+• Flight Monitor — departure board sorted by scheduled time; every flight gets an
+  ML-predicted delay probability with colour coding (red >50%, amber 30–50%, green on
+  track), plus an inline Cascade Inspector to view any flight's flow map or timeline.
+• Overview — high-level stats: delay class donut, delay distribution histogram
+  (P50/mean/P90), top-15 carriers by delay rate, widebody-vs-narrowbody box plot,
+  monthly trend line.
+• When Delays Happen — hour-of-day × day-of-week heatmaps showing when delays peak,
+  plus a departure-volume overlay and peak-hour bar chart.
+• Delay Attribution — splits each delay into root causes: SATS operations, propagated
+  (inbound aircraft late), tight scheduling, weather/lightning warnings, or compound;
+  includes SATS-attributable drill-down by activity.
+• Activity Analysis — three-level drill-down: Business Unit → activity → full stats
+  (delay histogram, hour-of-day pattern, departure-delay correlation, regression).
+• BU Impact Analyser — pick a Business Unit (Ramp, PAX, Cargo, Security, Load Control,
+  AIC, Cabin, Baggage, Tech Ramp) to see which of ITS activities run late, where they
+  sit on the turnaround cascade flowchart, and how many departure-delay minutes each
+  activity contributes (regression). Best page for "which team causes the most delays".
+• Cascade Effect — interactive simulation: choose an activity and a delay amount, and
+  watch how the delay propagates downstream through the whole turnaround dependency
+  chain to final pushback; includes flow map, timeline view, animation, and pairwise
+  delay-transfer tables.
+• Flight Investigation — filterable, sortable, copyable table of every flight; filter
+  by delay status, delay range, or per-activity delay thresholds. Best page for finding
+  specific flights matching criteria (e.g. "all flights where ramp was >10 min late").
+• Flight Deep Dive — pick ONE flight and see its full ground-activity Gantt chart
+  (planned vs actual), auto-written delay narrative, special-handling needs, and
+  milestone delay details.
+• Delay Predictor — enter a hypothetical flight's parameters (carrier, aircraft,
+  terminal, ground time, incoming delay, lightning conditions…) and get an ML risk
+  score plus a recommended action.
+• Ask the Data — THIS page: natural-language questions answered with real computed
+  numbers, charts, and follow-up discussion.
+• Data Quality — milestone data completeness observatory: health score gauge,
+  per-milestone coverage, coverage by Business Unit, and coverage trend over time.
+
+GLOBAL SIDEBAR FILTERS (most pages): Year/Quarter/Month/Day, Terminal, Aircraft Type,
+Aircraft Model (ICAO), Destination — a caption shows how many flights remain selected."""
+
 # ── LLM routing layer ─────────────────────────────────────────────────────────
 def _strip_fences(text: str) -> str:
     text = text.strip()
@@ -242,16 +290,43 @@ def llm_call(provider: str, api_key: str,
     except Exception as exc:
         return "", str(exc)
 
+# ── Conversational memory ─────────────────────────────────────────────────────
+HISTORY_DEPTH   = 4    # turns of memory carried into prompts
+MAX_FIELD_CHARS = 500  # per-field cap to bound prompt size
+
+def build_conversation_context(history: list, depth: int = HISTORY_DEPTH,
+                               max_field_chars: int = MAX_FIELD_CHARS) -> str:
+    """Compact transcript of the most recent `depth` turns for grounding the
+    code-gen pass, the discuss branch, and the intent classifier.
+    `history` is newest-first (insert(0, ...)), so the most recent turns are
+    history[:depth]; we present them oldest→newest for natural reading."""
+    if not history:
+        return ""
+    blocks = []
+    for turn in reversed(history[:depth]):
+        lines = [f"Q: {turn.get('question', '')}"]
+        if turn.get("text") not in (None, ""):
+            lines.append(f"Computed value: {str(turn['text'])[:max_field_chars]}")
+        df_r = turn.get("df_result")
+        if df_r is not None:
+            try:
+                if not df_r.empty:
+                    snippet = df_r.head(8).to_string(index=False)
+                    lines.append(f"Result table:\n{snippet[:max_field_chars]}")
+            except Exception:
+                pass
+        if turn.get("insight"):
+            lines.append(f"Answer given: {turn['insight'][:max_field_chars]}")
+        if turn.get("error"):
+            lines.append(f"(This turn errored: {turn['error'][:200]})")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
 # ── Pass 1: generate code ─────────────────────────────────────────────────────
 def generate_code(question: str, provider: str, api_key: str,
                   history: list) -> tuple[str, str]:
-    hist = ""
-    for item in reversed(history[-3:]):
-        hist += f"\nPrevious Q: {item['question']}"
-        if item.get("insight"):
-            hist += f"\nPrevious answer summary: {item['insight'][:180]}"
-
-    system = CODE_SYSTEM + (f"\n\nCONVERSATION CONTEXT:{hist}" if hist else "")
+    hist = build_conversation_context(history)
+    system = CODE_SYSTEM + (f"\n\nCONVERSATION CONTEXT:\n{hist}" if hist else "")
     raw, err = llm_call(provider, api_key, system, question, max_tokens=2000)
     if err:
         return "", err
@@ -352,6 +427,47 @@ Start directly — no "Based on the data..." preamble."""
     text, _ = llm_call(provider, api_key, system, user, max_tokens=450)
     return text.strip()
 
+# ── Discuss branch: conversational follow-ups & app guidance ─────────────────
+DISCUSS_SYSTEM_TEMPLATE = """You are the conversational analyst assistant embedded in
+the SATS Ground Operations dashboard (Singapore Changi Airport departure flight data,
+{n:,} flights currently selected).
+
+You are NOT writing code and NOT running any new calculation this turn — the user is
+asking you to discuss, elaborate on, clarify, or rephrase something already established
+in the conversation, asking a general concept question about airport/ground-handling
+terminology (e.g. "what is PLB Dock"), or asking where in the dashboard to find
+something.
+
+{app_guide}
+
+RULES:
+• Ground every number you cite strictly in the CONVERSATION CONTEXT — never invent
+  statistics. If answering properly would need a brand-new computation you don't have
+  numbers for, say so plainly and suggest phrasing it as a direct data question
+  (e.g. "Ask me 'break that down by terminal' and I'll pull the exact numbers").
+• For "where do I find X" questions, name the exact page from the guide above and
+  describe concretely what the user will see and do there.
+• Unlike a single data insight, you may write as much as is genuinely useful —
+  short paragraphs or bullet points — in plain, friendly language for non-technical
+  ground-ops staff. No mention of DataFrames, code, or pandas.
+• Do not start with "Based on the data..." — answer directly."""
+
+def answer_discussion(question: str, history: list,
+                      provider: str, api_key: str) -> str:
+    """Pure conversational LLM call — no code generation or execution."""
+    ctx = build_conversation_context(history)
+    system = DISCUSS_SYSTEM_TEMPLATE.format(n=len(df), app_guide=APP_GUIDE)
+    user = f"""CONVERSATION CONTEXT (oldest first):
+{ctx or '(no prior turns yet — this is the first message)'}
+
+User's latest message: "{question}"
+
+Respond conversationally, directly addressing what they asked."""
+    text, err = llm_call(provider, api_key, system, user, max_tokens=700)
+    if err:
+        return f"Sorry, I couldn't process that: {err}"
+    return text.strip()
+
 # ── Intent guard ─────────────────────────────────────────────────────────────
 _DATA_KEYWORDS = {
     "delay", "delayed", "on-time", "ontime", "flight", "flights", "carrier",
@@ -374,16 +490,23 @@ _CHITCHAT_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-def classify_intent(question: str) -> str:
-    """
-    Returns 'data' or 'chitchat'.
-    A question is treated as data-related if it contains at least one data keyword
-    OR is long enough to likely be a real question (> 5 words).
-    Everything else is chitchat.
-    """
+_DISCUSS_PATTERNS = re.compile(
+    r"^(tell me more|go on|continue|elaborate|say more|"
+    r"explain( (that|this|it))?|can you (explain|clarify)|"
+    r"why( is| was)? (that|this|it)|what does (that|this|it) mean|"
+    r"what do you mean|in simpler terms|simpler please|"
+    r"where (can|do) i (see|find|check|look)[\w\s\-]*\??|"
+    r"which page[\w\s\-]*\??|how do i use[\w\s\-]*\??)\W*$",
+    re.IGNORECASE,
+)
+# NOTE: deliberately NO broad "what is X" fast-path — "what is PLB Dock" (concept)
+# vs "what is the average delay" (computation) needs the LLM classifier to tell apart.
+
+def _classify_intent_heuristic(question: str) -> str:
+    """Original keyword/word-count fallback — used only if the LLM classifier
+    call fails, so the page never breaks on a classifier outage."""
     q_lower = question.lower()
     words   = re.findall(r"[a-z]+", q_lower)
-
     if _CHITCHAT_PATTERNS.match(question.strip()):
         return "chitchat"
     if any(w in _DATA_KEYWORDS for w in words):
@@ -391,6 +514,47 @@ def classify_intent(question: str) -> str:
     if len(words) > 5:
         return "data"
     return "chitchat"
+
+_INTENT_SYSTEM = """You are an intent classifier for a data-analytics chat assistant.
+Classify the user's latest message into exactly one category and reply with ONLY that
+single word.
+
+DATA — the message asks for a new computation, chart, metric, ranking, or breakdown
+from the flight-operations dataset — including follow-ups that need a fresh
+calculation not already answered (e.g. "now break that down by terminal",
+"what about narrowbody only", "compare that to Terminal 3").
+
+DISCUSS — a follow-up needing NO new computation: elaborate, clarify, rephrase, or
+discuss something already said; a general concept question (e.g. "what is PLB Dock");
+or a question about the dashboard app itself — where to find something, what a page
+does, or how to use a feature (e.g. "where can I see which team causes delays?").
+
+Reply with exactly one word: DATA or DISCUSS."""
+
+def _classify_intent_llm(question: str, history: list,
+                         provider: str, api_key: str) -> tuple[str, str]:
+    ctx = build_conversation_context(history, depth=2, max_field_chars=200)
+    user = (f'Conversation so far:\n{ctx or "(none yet)"}\n\n'
+            f'Latest message: "{question}"\n\nCategory:')
+    raw, err = llm_call(provider, api_key, _INTENT_SYSTEM, user, max_tokens=8)
+    if err:
+        return "", err
+    return ("discuss" if "DISCUSS" in raw.strip().upper() else "data"), ""
+
+def classify_intent(question: str, history: list,
+                    provider: str, api_key: str) -> str:
+    """Returns 'data' | 'discuss' | 'chitchat'.
+    Hybrid: free regex fast-paths for the unambiguous cases, a tiny LLM call
+    for everything else, heuristic fallback if that call errors."""
+    q = question.strip()
+    if _CHITCHAT_PATTERNS.match(q):
+        return "chitchat"
+    if _DISCUSS_PATTERNS.match(q):
+        return "discuss"
+    label, err = _classify_intent_llm(question, history, provider, api_key)
+    if err:
+        return _classify_intent_heuristic(question)
+    return label
 
 
 _CHITCHAT_REPLY = (
@@ -400,7 +564,10 @@ _CHITCHAT_REPLY = (
     "- *Show delays by hour of day*\n"
     "- *Compare Terminal 2 vs Terminal 3*\n"
     "- *What activity causes the most delays?*\n\n"
-    "Just type a question about the flight data and I'll run the numbers for you."
+    "I can also **keep the conversation going** — after an answer, just type "
+    "*\"tell me more\"* or *\"why is that?\"* — and I know my way around this "
+    "dashboard, so you can ask things like *\"where do I see which team causes "
+    "the most delays?\"*"
 )
 
 
@@ -416,8 +583,8 @@ SUGGESTIONS = [
     "Top 10 destinations by delay rate",
     "How does incoming delay affect departure delay?",
     "Which airline has the best on-time rate?",
-    "Show a heatmap of delays by day and hour",
-    "Average delay by aircraft type",
+    "Where do I see which team causes the most delays?",
+    "What can this dashboard do?",
 ]
 
 # ── Page header ───────────────────────────────────────────────────────────────
@@ -532,8 +699,12 @@ _auto = st.session_state.pop("ask_auto", False)
 if (ask_btn or _auto) and user_q.strip():
     question = user_q.strip()
 
-    # ── Intent guard — skip the full pipeline for greetings / chitchat ────────
-    if classify_intent(question) == "chitchat":
+    # ── Intent routing: data / discuss / chitchat ─────────────────────────────
+    with st.spinner("Understanding your question…"):
+        intent = classify_intent(question, st.session_state["ask_history"],
+                                 provider, api_key)
+
+    if intent == "chitchat":
         chitchat_entry = {
             "question": question,
             "provider": provider,
@@ -543,9 +714,27 @@ if (ask_btn or _auto) and user_q.strip():
             "df_result": None,
             "error":    None,
             "code":     "",
-            "is_chitchat": True,
+            "intent":   "chitchat",
         }
         st.session_state["ask_history"].insert(0, chitchat_entry)
+        st.rerun()
+
+    if intent == "discuss":
+        with st.spinner(f"Thinking via {provider}…"):
+            reply = answer_discussion(question, st.session_state["ask_history"],
+                                      provider, api_key)
+        discuss_entry = {
+            "question": question,
+            "provider": provider,
+            "insight":  reply,
+            "text":     None,
+            "fig":      None,
+            "df_result": None,
+            "error":    None,
+            "code":     "",
+            "intent":   "discuss",
+        }
+        st.session_state["ask_history"].insert(0, discuss_entry)
         st.rerun()
 
     with st.spinner(f"Generating code via {provider}…"):
@@ -578,6 +767,7 @@ if (ask_btn or _auto) and user_q.strip():
 
         result["question"] = question
         result["provider"] = provider
+        result["intent"]   = "data"
         st.session_state["ask_history"].insert(0, result)
         st.rerun()
 
@@ -653,8 +843,9 @@ for i, entry in enumerate(st.session_state["ask_history"]):
                 and entry.get("text") in (None, "")):
             st.warning("No output produced — try rephrasing.")
 
-    with st.expander("View generated code", expanded=False):
-        st.code(entry.get("code", ""), language="python")
+    if entry.get("code"):
+        with st.expander("View generated code", expanded=False):
+            st.code(entry["code"], language="python")
 
     if i < len(st.session_state["ask_history"]) - 1:
         st.markdown(
@@ -672,13 +863,15 @@ with st.sidebar:
         How it works
       </div>
       <div style="font-size:0.76rem;color:#6b7fa3;line-height:1.7">
-        1. Your question → AI writes analysis code<br>
-        2. Code runs on all <b style="color:#c5d3f0">{len(df):,} flights</b> locally<br>
-        3. Result → AI reads the real numbers<br>
-        4. AI writes a specific, data-backed answer<br><br>
+        1. Your question is read for intent — data question, follow-up, or greeting<br>
+        2. Data questions → AI writes analysis code, runs it on all
+        <b style="color:#c5d3f0">{len(df):,} flights</b> locally, then explains the real numbers<br>
+        3. Follow-ups ("tell me more", "why is that", "what is X") → AI discusses
+        what was already found — no re-computation<br>
+        4. It also knows every dashboard page — ask "where do I see…?"<br><br>
         <b style="color:#8898b8">Tips:</b><br>
         • Ask for a chart type: "bar chart", "scatter"<br>
-        • Follow-ups use prior context<br>
+        • Just keep typing — follow-ups use what was just discussed<br>
         • Sidebar filters apply to all questions
       </div>
     </div>
