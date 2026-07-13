@@ -76,7 +76,11 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
     """
     Renders sidebar filters (date, terminal, aircraft type, destination)
     and returns the filtered DataFrame.
-    Pass a unique page_key per page (e.g. "overview", "when", "activity").
+
+    Filter selections are GLOBAL — shared across every page via a fixed
+    session-state key — so choosing a filter on one page keeps it applied
+    when navigating to another. `page_key` is accepted for backward
+    compatibility with existing call sites but no longer affects widget keys.
     """
     with st.sidebar:
         # ── Date section ──────────────────────────────────────────────────────
@@ -88,7 +92,7 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
             sel_year_labels = _multiselect_all(
                 "Year",
                 options=[str(y) for y in available_years],
-                key=f"slicer_year_{page_key}",
+                key="slicer_year_global",
             )
             sel_years = [y for y in available_years if str(y) in sel_year_labels]
         else:
@@ -102,7 +106,7 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
             sel_quarter_labels = _multiselect_all(
                 "Quarter",
                 options=[quarter_labels[q] for q in available_quarters],
-                key=f"slicer_quarter_{page_key}",
+                key="slicer_quarter_global",
             )
             sel_quarters = [q for q, lbl in quarter_labels.items() if lbl in sel_quarter_labels]
         else:
@@ -118,7 +122,7 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
             sel_month_labels = _multiselect_all(
                 "Month",
                 options=[month_labels[m] for m in available_months],
-                key=f"slicer_month_{page_key}",
+                key="slicer_month_global",
             )
             sel_months = [m for m, lbl in month_labels.items() if lbl in sel_month_labels]
         else:
@@ -138,7 +142,7 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
                 sel_day_labels = _multiselect_all(
                     "Day",
                     options=[day_labels[d] for d in available_dates],
-                    key=f"slicer_day_{page_key}",
+                    key="slicer_day_global",
                 )
                 sel_days = [d for d, lbl in day_labels.items() if lbl in sel_day_labels]
 
@@ -155,7 +159,7 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
             )
             raw_terminals = [t for t in raw_terminals if t not in ("nan", "None", "")]
             sel_terminals_label = _multiselect_all(
-                "Terminal", options=raw_terminals, key=f"slicer_terminal_{page_key}"
+                "Terminal", options=raw_terminals, key="slicer_terminal_global"
             )
             terminal_map = {"Terminal 2": ["2", "T2", "Terminal 2"],
                             "Terminal 3": ["3", "T3", "Terminal 3"]}
@@ -173,7 +177,7 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
             )
             body_opts = [b for b in body_opts if b not in ("nan", "None", "")]
             sel_body = _multiselect_all(
-                "Aircraft Type", options=body_opts, key=f"slicer_body_{page_key}"
+                "Aircraft Type", options=body_opts, key="slicer_body_global"
             )
         else:
             sel_body = []
@@ -186,7 +190,7 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
             )
             icao_opts = [i for i in icao_opts if i not in ("nan", "None", "")]
             sel_icao = _multiselect_all(
-                "Aircraft Model (ICAO)", options=icao_opts, key=f"slicer_icao_{page_key}"
+                "Aircraft Model (ICAO)", options=icao_opts, key="slicer_icao_global"
             )
         else:
             sel_icao = []
@@ -201,7 +205,7 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
             )
             dest_opts = [d for d in dest_opts if d not in ("nan", "None", "")]
             sel_dest = _multiselect_all(
-                "Destination", options=dest_opts, key=f"slicer_dest_{page_key}"
+                "Destination", options=dest_opts, key="slicer_dest_global"
             )
         else:
             sel_dest = []

@@ -428,6 +428,7 @@ if sel_activity and sel_activity in activity_stats:
         {BU_ICONS.get(selected_bu,'')} {sel_activity} — Activity Analysis
       </div>
       <div style="font-size:0.78rem;color:{card_sub()};margin-top:4px">
+        On average, this activity exceeded <b>PTS</b> by <b>{stat['mean_delay']:.1f} minutes</b> ·
         {stat['pct_late']:.1f}% of flights had this activity running late ·
         Ridge regression coef: {stat['coef']:.3f} · R² = {stat['r2']:.2f}
       </div>

@@ -59,38 +59,36 @@ if "id" not in df.columns:
     st.error("Flight ID column not found.")
     st.stop()
 
-# Build flight labels
+# Build flight labels — cached so removing the old 1,000-flight cap stays fast
 carrier_col = "identification_carrierCode" if "identification_carrierCode" in df.columns else None
 iata_col    = "identification_iata"         if "identification_iata"         in df.columns else None
 sched_col   = "departure_offBlock.scheduled"
 
-# Sample at most 5000 for dropdown performance
-sample_df = df.dropna(subset=["Target_Departure_Delay_Class"]).copy()
-sample_df = sample_df[sample_df["Target_Departure_Delay_Class"] != "nan"]
+@st.cache_data(show_spinner="Loading flight list…")
+def build_flight_options(_df, carrier_col, iata_col, sched_col):
+    sample_df = _df.dropna(subset=["Target_Departure_Delay_Class"]).copy()
+    sample_df = sample_df[sample_df["Target_Departure_Delay_Class"] != "nan"]
 
-def make_label(row):
-    parts = []
-    if carrier_col:
-        parts.append(str(row.get(carrier_col, "")))
-    if iata_col:
-        parts.append(str(row.get(iata_col, "")))
-    if sched_col in row and pd.notna(row[sched_col]):
-        try:
-            dt = pd.to_datetime(row[sched_col])
-            parts.append(dt.strftime("%d %b %Y %H:%M"))
-        except Exception:
-            pass
-    parts.append(f"({str(row['id'])[:8]}...)")
-    return " | ".join(p for p in parts if p and p != "nan")
+    if sched_col in sample_df.columns:
+        sample_df = sample_df.sort_values(sched_col, ascending=False)
+        sched_str = pd.to_datetime(sample_df[sched_col], errors="coerce").dt.strftime("%d %b %Y %H:%M")
+    else:
+        sched_str = pd.Series("", index=sample_df.index)
 
-# Sort by scheduled departure (most recent first)
-if sched_col in sample_df.columns:
-    sample_df = sample_df.sort_values(sched_col, ascending=False)
+    parts = pd.DataFrame(index=sample_df.index)
+    parts["carrier"] = sample_df[carrier_col].astype(str) if carrier_col else ""
+    parts["iata"]    = sample_df[iata_col].astype(str)     if iata_col    else ""
+    parts["sched"]   = sched_str.fillna("")
+    parts["idtag"]   = "(" + sample_df["id"].astype(str).str[:8] + "...)"
 
-# Limit dropdown to 1000 entries
-dropdown_df = sample_df.head(1000)
-flight_labels = dropdown_df.apply(make_label, axis=1).tolist()
-flight_ids    = dropdown_df["id"].tolist()
+    def _join(row):
+        return " | ".join(v for v in row if v and v != "nan")
+
+    labels = parts.apply(_join, axis=1).tolist()
+    ids    = sample_df["id"].tolist()
+    return labels, ids
+
+flight_labels, flight_ids = build_flight_options(df, carrier_col, iata_col, sched_col)
 
 id_to_label = dict(zip(flight_ids, flight_labels))
 label_to_id = {v: k for k, v in id_to_label.items()}
@@ -100,8 +98,8 @@ with search_col:
     selected_label = st.selectbox(
         "Search / Select a Flight",
         options=flight_labels,
-        index=0,
-        help="Showing up to 1,000 most recent flights.",
+        index=0 if flight_labels else None,
+        help=f"All {len(flight_labels):,} flights matching the current filters — type to search.",
     )
 
 selected_id  = label_to_id.get(selected_label)

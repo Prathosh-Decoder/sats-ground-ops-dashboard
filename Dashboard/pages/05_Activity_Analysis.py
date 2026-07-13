@@ -206,6 +206,18 @@ if st.session_state["selected_activity"]:
         unsafe_allow_html=True,
     )
 
+    # Headline PTS-overrun sentence — ground-staff-facing plain language
+    if act_row["count"] >= 10 and not np.isnan(act_row["avg_delay_mins"]):
+        st.markdown(
+            f"<p style='font-size:1.05rem;color:{card_text()};margin-bottom:4px'>"
+            f"📐 On average, this activity exceeded <b>PTS</b> "
+            f"(Planned Time Standard) by <b style='color:{bu_info['color']}'>"
+            f"{act_row['avg_delay_mins']:.1f} minutes</b>.</p>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info("No data")
+
     # Extended KPI row — compute live stats from raw delay data
     _raw_s = df[delay_col].dropna() if delay_col in df.columns else pd.Series(dtype=float)
     _med_d = float(_raw_s.median())       if len(_raw_s) else float("nan")
@@ -336,6 +348,8 @@ if st.session_state["selected_activity"]:
                     title=f"Correlation with departure delay: r = {corr_val:.2f}",
                 )
                 st.plotly_chart(scatter, use_container_width=True)
+            else:
+                st.info("No data")
 
     # ── Percentile stats + delay type breakdown ──────────────────────────────
     st.divider()
@@ -480,6 +494,8 @@ if st.session_state["selected_activity"]:
                 yaxis=dict(range=[0, max(sd_val, do_val) * 1.4 + 0.5]),
             )
             st.plotly_chart(comp_fig, use_container_width=True)
+    else:
+        st.info("No data")
 
     # ── Predecessor analysis ─────────────────────────────────────────────────
     st.divider()
@@ -727,9 +743,9 @@ if st.session_state["selected_bu"]:
         _avg_late  = bu_acts["late_rate"].mean() * 100
         insight_card(
             problem=(f"Within **{bu_info['label']}**, the slowest activity is "
-                     f"**{_worst_act['activity'].split(': ')[-1]}** "
-                     f"with an average delay of **{_worst_act['avg_delay_mins']:.1f} min** "
-                     f"and {_worst_act['late_rate']*100:.0f}% late rate."),
+                     f"**{_worst_act['activity'].split(': ')[-1]}** — on average it exceeded "
+                     f"**PTS** by **{_worst_act['avg_delay_mins']:.1f} min** "
+                     f"and runs late on {_worst_act['late_rate']*100:.0f}% of flights."),
             impact=(f"The team average is {_avg_late:.0f}% late across all activities. "
                     f"The best activity ({_best_act['activity'].split(': ')[-1]}) runs at only "
                     f"{_best_act['avg_delay_mins']:.1f} min avg — the gap shows where "
@@ -886,7 +902,7 @@ if st.session_state["selected_bu"]:
                         {act_label}
                       </div>
                       <div style="font-size:1.4rem;font-weight:700;color:{color};margin:6px 0">
-                        {avg_d:.1f} min avg delay
+                        {avg_d:.1f} min over PTS
                       </div>
                       <div style="font-size:.78rem;color:{card_sub()}">{late_pct:.0f}% late · {int(row['count']):,} flights</div>
                     </div>""",
