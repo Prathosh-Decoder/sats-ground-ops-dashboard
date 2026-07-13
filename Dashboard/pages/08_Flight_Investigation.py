@@ -188,7 +188,7 @@ if "Target_Departure_Delay_Class" in display_rows.columns:
 # Terminal label
 if "origin_terminal" in display_rows.columns:
     display_rows["Terminal"] = display_rows["origin_terminal"].astype(str).replace(
-        {"2": "T2", "3": "T3"}
+        {"1": "T1", "2": "T2", "3": "T3", "4": "T4"}
     )
 
 # Select and rename columns for display

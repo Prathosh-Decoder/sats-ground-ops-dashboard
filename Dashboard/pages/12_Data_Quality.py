@@ -540,7 +540,8 @@ with dim_l:
                     ["_active_coverage"].mean().reset_index())
         term_grp.columns = ["Terminal", "Coverage %"]
         term_grp = term_grp[~term_grp["Terminal"].isin(["nan", "None", ""])]
-        term_grp["Terminal"] = term_grp["Terminal"].replace({"2": "T2", "3": "T3"})
+        term_grp["Terminal"] = term_grp["Terminal"].replace(
+            {"1": "T1", "2": "T2", "3": "T3", "4": "T4"})
         term_grp["Coverage %"] = term_grp["Coverage %"].round(1)
         t_colors = ["#2ecc71" if v >= 99 else "#f39c12" if v > 50 else "#e74c3c"
                     for v in term_grp["Coverage %"]]

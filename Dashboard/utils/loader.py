@@ -153,16 +153,20 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
         if "origin_terminal" in df.columns:
             raw_terminals = sorted(
                 df["origin_terminal"].dropna().astype(str)
-                .replace({"2": "Terminal 2", "3": "Terminal 3",
-                          "T2": "Terminal 2", "T3": "Terminal 3"})
+                .replace({"1": "Terminal 1", "2": "Terminal 2",
+                          "3": "Terminal 3", "4": "Terminal 4",
+                          "T1": "Terminal 1", "T2": "Terminal 2",
+                          "T3": "Terminal 3", "T4": "Terminal 4"})
                 .unique().tolist()
             )
             raw_terminals = [t for t in raw_terminals if t not in ("nan", "None", "")]
             sel_terminals_label = _multiselect_all(
                 "Terminal", options=raw_terminals, key="slicer_terminal_global"
             )
-            terminal_map = {"Terminal 2": ["2", "T2", "Terminal 2"],
-                            "Terminal 3": ["3", "T3", "Terminal 3"]}
+            terminal_map = {"Terminal 1": ["1", "T1", "Terminal 1"],
+                            "Terminal 2": ["2", "T2", "Terminal 2"],
+                            "Terminal 3": ["3", "T3", "Terminal 3"],
+                            "Terminal 4": ["4", "T4", "Terminal 4"]}
             sel_terminal_raw = []
             for lbl in sel_terminals_label:
                 sel_terminal_raw.extend(terminal_map.get(lbl, [lbl]))

@@ -272,7 +272,8 @@ if st.session_state["selected_activity"]:
                 pin_df["Date"] = _psched.dt.strftime("%Y-%m-%d")
                 pin_df["Dep Time"] = _psched.dt.strftime("%H:%M")
             if "origin_terminal" in pin_df.columns:
-                pin_df["Terminal"] = pin_df["origin_terminal"].astype(str).replace({"2": "T2", "3": "T3"})
+                pin_df["Terminal"] = pin_df["origin_terminal"].astype(str).replace(
+                    {"1": "T1", "2": "T2", "3": "T3", "4": "T4"})
             if "destination_iata" in pin_df.columns:
                 pin_df["Destination"] = pin_df["destination_iata"]
             pin_df["This Activity (min)"] = pin_df[delay_col].round(1)

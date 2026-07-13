@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from utils.loader   import load_data, load_model, merge_lw_features
+from utils.loader   import load_data, load_model, merge_lw_features, render_date_filters
 from utils.style    import inject_css, card_bg, card_text, card_sub, header_bg, header_border
 from utils.insights import insight_card, insight_strip
 from utils.cascade  import build_flowchart, build_timeline, get_flight_cascade_nd
@@ -28,6 +28,7 @@ inject_css()
 
 # ── Data & Model ──────────────────────────────────────────────────────────────
 df    = load_data()
+df    = render_date_filters(df, page_key="monitor")
 df    = merge_lw_features(df)
 model = load_model()
 
@@ -57,34 +58,20 @@ numeric_feats = model.get("numeric_feats", [])
 cat_feats     = model.get("categorical_feats", [])
 
 # ── Sidebar filters ───────────────────────────────────────────────────────────
+# Date/Terminal/Aircraft Type/ICAO/Destination all come from render_date_filters
+# above (shared, persists across pages). Only Flight Monitor's own extra
+# filters (Carrier, Day of Week, risk/conditions) are added here.
 with st.sidebar:
     st.markdown("### 🛫 Flight Filters")
 
     n_flights = st.number_input("Flights to show", 20, 500, 100, step=20)
 
-    st.markdown("#### Carrier & Aircraft")
+    st.markdown("#### Carrier")
     carriers = sorted(df["identification_carrierCode"].dropna().unique().tolist()) if "identification_carrierCode" in df.columns else []
-    sel_carrier = st.multiselect("Carrier", carriers, placeholder="All carriers")
-
-    body_opts = sorted(df["aircraft_bodyType"].dropna().astype(str).unique().tolist()) if "aircraft_bodyType" in df.columns else []
-    body_opts = [b for b in body_opts if b not in ("nan","None","")]
-    sel_body = st.multiselect("Aircraft Body Type", body_opts, placeholder="All types")
-
-    icao_opts = sorted(df["aircraft_typeICAO"].dropna().astype(str).unique().tolist()) if "aircraft_typeICAO" in df.columns else []
-    icao_opts = [i for i in icao_opts if i not in ("nan","None","")]
-    sel_icao = st.multiselect("Aircraft Model (ICAO)", icao_opts, placeholder="All models")
-
-    st.markdown("#### Operations")
-    terminals = sorted(df["origin_terminal"].dropna().astype(str).unique().tolist()) if "origin_terminal" in df.columns else []
-    terminals = [t for t in terminals if t not in ("nan","None","")]
-    sel_terminal = st.multiselect("Terminal", terminals, placeholder="All terminals")
-
-    dest_opts = sorted(df["destination_iata"].dropna().astype(str).unique().tolist()) if "destination_iata" in df.columns else []
-    dest_opts = [d for d in dest_opts if d not in ("nan","None","")]
-    sel_dest = st.multiselect("Destination", dest_opts, placeholder="All destinations")
+    sel_carrier = st.multiselect("Carrier", carriers, placeholder="All carriers", key="slicer_carrier_global")
 
     day_opts = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
-    sel_days = st.multiselect("Day of Week", day_opts, placeholder="All days")
+    sel_days = st.multiselect("Day of Week", day_opts, placeholder="All days", key="slicer_dow_global")
 
     st.markdown("#### Risk & Conditions")
     risk_filter = st.selectbox(
@@ -128,14 +115,6 @@ working = df.copy()
 
 if sel_carrier:
     working = working[working["identification_carrierCode"].isin(sel_carrier)]
-if sel_body:
-    working = working[working["aircraft_bodyType"].astype(str).isin(sel_body)]
-if sel_icao:
-    working = working[working["aircraft_typeICAO"].astype(str).isin(sel_icao)]
-if sel_terminal:
-    working = working[working["origin_terminal"].astype(str).isin(sel_terminal)]
-if sel_dest:
-    working = working[working["destination_iata"].astype(str).isin(sel_dest)]
 if sel_days and "Day_of_Week" in working.columns:
     working = working[working["Day_of_Week"].isin(sel_days)]
 if gt_tight_only and "Is_Ground_Time_Deficient" in working.columns:
