@@ -178,7 +178,7 @@ components.html(f"""
 
   <div class="badge"><div class="dot"></div>Live Analytics Platform</div>
   <h1>SATS <span>Ground Operations</span></h1>
-  <div class="sub">Intelligence Dashboard &nbsp;·&nbsp; Changi Airport T2 &amp; T3 &nbsp;·&nbsp; Singapore</div>
+  <div class="sub">Intelligence Dashboard &nbsp;·&nbsp; All SATS-Handled Airlines &nbsp;·&nbsp; Changi Airport, Singapore</div>
 
   <div class="kpis">
     <div class="kpi">

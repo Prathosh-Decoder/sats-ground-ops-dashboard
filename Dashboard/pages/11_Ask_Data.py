@@ -68,8 +68,8 @@ def get_keys() -> dict:
 @st.cache_data(show_spinner=False)
 def build_schema(_df: pd.DataFrame) -> str:
     lines = [
-        f"DataFrame `df` — {len(_df):,} rows of SATS departure flight data,",
-        "Singapore Changi Airport (Terminal 2 and Terminal 3).",
+        f"DataFrame `df` — {len(_df):,} rows of SATS departure flight data across all SATS-handled",
+        "airlines, Singapore Changi Airport (Terminals 1-4; predominantly T2 and T3).",
         "",
         "KEY COLUMNS:",
     ]
