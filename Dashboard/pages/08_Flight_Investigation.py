@@ -170,8 +170,9 @@ display_rows = filtered.copy()
 # Date and time from scheduled departure
 if "departure_offBlock.scheduled" in display_rows.columns:
     sched = pd.to_datetime(display_rows["departure_offBlock.scheduled"], errors="coerce", utc=True)
-    display_rows["Date"]         = sched.dt.strftime("%Y-%m-%d")
-    display_rows["Dep Time"]     = sched.dt.strftime("%H:%M")
+    sched_sgt = sched.dt.tz_convert("Asia/Singapore")
+    display_rows["Date"]         = sched_sgt.dt.strftime("%Y-%m-%d")
+    display_rows["Dep Time"]     = sched_sgt.dt.strftime("%H:%M")
     display_rows["_sched_epoch"] = sched.astype("int64")   # hidden sort key for "Most Recent"
 
 # Nicely formatted delay class with emoji
@@ -261,6 +262,10 @@ elif sort_col in table.columns:
 table = table.drop(columns=["_sched_epoch"], errors="ignore")
 
 # ─── Table ────────────────────────────────────────────────────────────────────
+if table.empty:
+    st.info("📊 No flights match the current filters — try widening the date range or clearing a filter.")
+    st.stop()
+
 st.markdown(
     f"**{len(table):,} flights** match your filters. "
     "Select rows and press **Ctrl+C / Cmd+C** to copy to clipboard."
@@ -322,7 +327,7 @@ else:
                     parts.append(v)
         if "departure_offBlock.scheduled" in row.index:
             try:
-                dt = pd.to_datetime(row["departure_offBlock.scheduled"], utc=True)
+                dt = pd.to_datetime(row["departure_offBlock.scheduled"], utc=True).tz_convert("Asia/Singapore")
                 parts.append(dt.strftime("%d %b %H:%M"))
             except Exception:
                 pass

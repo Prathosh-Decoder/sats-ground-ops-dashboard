@@ -14,7 +14,7 @@ import streamlit as st
 
 from utils.loader       import load_data, render_date_filters, load_lw_data, merge_lw_features
 from utils.style        import inject_css, chart_template, chart_fc, card_text, card_sub, header_bg, header_border
-from utils.insights     import insight_card, insight_strip
+from utils.insights     import insight_card, insight_strip, no_data_info
 from utils.crossfilter  import init_xf, apply_xf, render_xf_bar, handle_selection, get_xf, bar_colors, pie_pull
 
 st.set_page_config(
@@ -267,6 +267,8 @@ with col_r:
             showlegend=False,
         )
         st.plotly_chart(bar_fig, use_container_width=True)
+    else:
+        no_data_info("Average Delay by Attribution Category", n=0, min_n=1)
 
 st.divider()
 
@@ -349,6 +351,8 @@ if "Incoming_Delay_mins" in valid.columns and "Target_Departure_Delay_Class" in 
             ])
         )
         st.dataframe(styled, use_container_width=True, hide_index=True)
+    else:
+        no_data_info("Inbound Arrival Condition vs Departure Performance", n=0, min_n=1)
 
 st.divider()
 
@@ -430,22 +434,26 @@ else:
         )
         ov_stats = (valid2.groupby("LW_Overlap_Bin", observed=True)["Target_Departure_Delay_mins"]
                     .agg(avg="mean", cnt="count").reset_index())
+        ov_stats = ov_stats[ov_stats["cnt"] > 0]
 
-        ov_fig = go.Figure(go.Bar(
-            x=ov_stats["LW_Overlap_Bin"].astype(str),
-            y=ov_stats["avg"].clip(upper=60),
-            marker_color=["#2ecc71", "#f1c40f", "#e67e22", "#e74c3c"],
-            text=[f"{v:.1f} min<br>({n:,} flights)" for v, n in zip(ov_stats["avg"], ov_stats["cnt"])],
-            textposition="outside",
-            textfont=dict(color=FC, size=10),
-        ))
-        ov_fig.update_layout(
-            template=TEMPLATE, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            xaxis=dict(title="LW overlap with ground-handling window"),
-            yaxis=dict(title="Avg Departure Delay (min)"),
-            height=320, margin=dict(t=20, b=60, l=60, r=20), showlegend=False,
-        )
-        st.plotly_chart(ov_fig, use_container_width=True)
+        if not ov_stats.empty:
+            ov_fig = go.Figure(go.Bar(
+                x=ov_stats["LW_Overlap_Bin"].astype(str),
+                y=ov_stats["avg"].clip(upper=60),
+                marker_color=["#2ecc71", "#f1c40f", "#e67e22", "#e74c3c"][:len(ov_stats)],
+                text=[f"{v:.1f} min<br>({n:,} flights)" for v, n in zip(ov_stats["avg"], ov_stats["cnt"])],
+                textposition="outside",
+                textfont=dict(color=FC, size=10),
+            ))
+            ov_fig.update_layout(
+                template=TEMPLATE, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(title="LW overlap with ground-handling window"),
+                yaxis=dict(title="Avg Departure Delay (min)"),
+                height=320, margin=dict(t=20, b=60, l=60, r=20), showlegend=False,
+            )
+            st.plotly_chart(ov_fig, use_container_width=True)
+        else:
+            no_data_info("Avg Departure Delay by LW Overlap", n=0, min_n=1)
 
     # ── Monthly LW frequency & delay rate trend ────────────────────────────────
     st.markdown("#### Monthly: LW Frequency vs Delay Rate")
@@ -508,26 +516,29 @@ else:
             n=("Target_Departure_Delay_Class", "count"),
         ).reset_index()
 
-        hour_fig = go.Figure()
-        if not hour_nlw.empty:
-            hour_fig.add_trace(go.Bar(
-                x=hour_nlw["Hour_of_Day"], y=hour_nlw["delay_rate"],
-                name="No LW at Departure", marker_color="rgba(41,128,185,0.7)",
-            ))
-        if not hour_lw.empty:
-            hour_fig.add_trace(go.Bar(
-                x=hour_lw["Hour_of_Day"], y=hour_lw["delay_rate"],
-                name="⚡ LW Active at Departure", marker_color="rgba(241,196,15,0.9)",
-            ))
-        hour_fig.update_layout(
-            template=TEMPLATE, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            barmode="overlay",
-            xaxis=dict(title="UTC Departure Hour", dtick=1),
-            yaxis=dict(title="Delay Rate (%)", range=[0, 100]),
-            height=320, margin=dict(t=20, b=60, l=60, r=20),
-            legend=dict(orientation="h", y=1.12),
-        )
-        st.plotly_chart(hour_fig, use_container_width=True)
+        if hour_nlw.empty and hour_lw.empty:
+            no_data_info("Departure Hour LW Impact", n=0, min_n=1)
+        else:
+            hour_fig = go.Figure()
+            if not hour_nlw.empty:
+                hour_fig.add_trace(go.Bar(
+                    x=hour_nlw["Hour_of_Day"], y=hour_nlw["delay_rate"],
+                    name="No LW at Departure", marker_color="rgba(41,128,185,0.7)",
+                ))
+            if not hour_lw.empty:
+                hour_fig.add_trace(go.Bar(
+                    x=hour_lw["Hour_of_Day"], y=hour_lw["delay_rate"],
+                    name="⚡ LW Active at Departure", marker_color="rgba(241,196,15,0.9)",
+                ))
+            hour_fig.update_layout(
+                template=TEMPLATE, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                barmode="overlay",
+                xaxis=dict(title="UTC Departure Hour", dtick=1),
+                yaxis=dict(title="Delay Rate (%)", range=[0, 100]),
+                height=320, margin=dict(t=20, b=60, l=60, r=20),
+                legend=dict(orientation="h", y=1.12),
+            )
+            st.plotly_chart(hour_fig, use_container_width=True)
 
     # ── LW-attributed flight table ─────────────────────────────────────────────
     lw_attributed = delayed_only[delayed_only["attribution"].str.contains("LW", na=False)].copy()
@@ -562,6 +573,8 @@ else:
             disp["Delay (min)"] = disp["Delay (min)"].round(1)
         st.dataframe(disp.sort_values("Delay (min)", ascending=False).reset_index(drop=True),
                      use_container_width=True, height=300)
+    else:
+        st.success("✅ No delayed flights were attributed to lightning warnings in the current filter.")
 
 st.divider()
 
@@ -694,6 +707,8 @@ if "identification_carrierCode" in delayed_only.columns:
         _carrier_attr_evt = st.plotly_chart(c_fig, use_container_width=True,
                                             on_select="rerun", key="xf_attr_carrier")
         handle_selection(_carrier_attr_evt, "carrier", axis="x")
+    else:
+        no_data_info("Attribution by Carrier", n=0, min_n=20)
 
 st.divider()
 

@@ -13,7 +13,7 @@ import streamlit as st
 
 from utils.loader       import load_data, render_date_filters, merge_lw_features, load_lw_data
 from utils.style        import inject_css, kpi_card, chart_template, chart_fc
-from utils.insights     import insight_card, insight_strip, compute_overview_stats
+from utils.insights     import insight_card, insight_strip, compute_overview_stats, no_data_info
 from utils.crossfilter  import init_xf, apply_xf, render_xf_bar, handle_selection, get_xf, bar_colors, pie_pull
 
 st.set_page_config(page_title="Overview | SATS", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
@@ -194,36 +194,39 @@ with c_right:
         carrier_stats["delay_rate"] = carrier_stats["delayed"] / carrier_stats["total"] * 100
         top15 = carrier_stats.nlargest(15, "delay_rate").sort_values("delay_rate")
 
-        _active_carrier = get_xf("carrier")
-        _bar_c = bar_colors(top15["identification_carrierCode"], _active_carrier)
-        _marker = dict(color=_bar_c) if _bar_c else dict(
-            color=top15["delay_rate"],
-            colorscale=[[0, "#2ecc71"], [0.5, "#f39c12"], [1, "#e74c3c"]],
-            showscale=False,
-        )
+        if top15.empty:
+            no_data_info("Top Carriers by Delay Rate", n=0, min_n=20)
+        else:
+            _active_carrier = get_xf("carrier")
+            _bar_c = bar_colors(top15["identification_carrierCode"], _active_carrier)
+            _marker = dict(color=_bar_c) if _bar_c else dict(
+                color=top15["delay_rate"],
+                colorscale=[[0, "#2ecc71"], [0.5, "#f39c12"], [1, "#e74c3c"]],
+                showscale=False,
+            )
 
-        bar_carrier = go.Figure()
-        bar_carrier.add_trace(go.Bar(
-            y=top15["identification_carrierCode"],
-            x=top15["delay_rate"],
-            orientation="h",
-            marker=_marker,
-            text=[f"{v:.0f}%  ({n:,} flights)" for v, n in zip(top15["delay_rate"], top15["total"])],
-            textposition="outside",
-            textfont=dict(size=11),
-        ))
-        bar_carrier.update_layout(
-            template=TEMPLATE,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            margin=dict(t=10, b=10, l=10, r=80),
-            xaxis=dict(title="Delay Rate (%)", range=[0, top15["delay_rate"].max() * 1.25]),
-            yaxis=dict(title=""),
-            height=380,
-        )
-        _carrier_evt = st.plotly_chart(bar_carrier, use_container_width=True,
-                                       on_select="rerun", key="xf_overview_carrier")
-        handle_selection(_carrier_evt, "carrier", axis="y")
+            bar_carrier = go.Figure()
+            bar_carrier.add_trace(go.Bar(
+                y=top15["identification_carrierCode"],
+                x=top15["delay_rate"],
+                orientation="h",
+                marker=_marker,
+                text=[f"{v:.0f}%  ({n:,} flights)" for v, n in zip(top15["delay_rate"], top15["total"])],
+                textposition="outside",
+                textfont=dict(size=11),
+            ))
+            bar_carrier.update_layout(
+                template=TEMPLATE,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                margin=dict(t=10, b=10, l=10, r=80),
+                xaxis=dict(title="Delay Rate (%)", range=[0, top15["delay_rate"].max() * 1.25]),
+                yaxis=dict(title=""),
+                height=380,
+            )
+            _carrier_evt = st.plotly_chart(bar_carrier, use_container_width=True,
+                                           on_select="rerun", key="xf_overview_carrier")
+            handle_selection(_carrier_evt, "carrier", axis="y")
     else:
         st.info("Carrier code column not found in data.")
 
@@ -233,7 +236,7 @@ st.divider()
 st.markdown("#### Departure Delay Distribution")
 st.caption("How many minutes late do flights typically depart? Negative = early.")
 
-if "Target_Departure_Delay_mins" in valid.columns:
+if "Target_Departure_Delay_mins" in valid.columns and valid["Target_Departure_Delay_mins"].notna().any():
     delay_vals = valid["Target_Departure_Delay_mins"].dropna()
     delay_clipped = delay_vals.clip(-30, 90)
 
@@ -275,6 +278,8 @@ if "Target_Departure_Delay_mins" in valid.columns:
     s3.metric("Mean",     f"{delay_vals.mean():.1f} min")
     s4.metric("75th pct", f"{delay_vals.quantile(0.75):.1f} min")
     s5.metric("Maximum",  f"{delay_vals.max():.0f} min")
+else:
+    no_data_info("Departure Delay Distribution", n=0, min_n=1)
 
 st.divider()
 

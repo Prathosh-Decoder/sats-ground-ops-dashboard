@@ -40,6 +40,10 @@ if "Hour_of_Day" not in valid.columns or "Day_of_Week" not in valid.columns:
     st.error("Time feature columns are missing. Please re-run prepare_data.py.")
     st.stop()
 
+if valid.empty:
+    st.warning("No flights match the current filters.")
+    st.stop()
+
 # ─── Page Header ─────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="margin-bottom:24px">

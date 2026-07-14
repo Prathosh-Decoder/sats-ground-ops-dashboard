@@ -14,7 +14,7 @@ from sklearn.linear_model import Ridge
 import streamlit as st
 from utils.loader       import load_data, render_date_filters
 from utils.style        import inject_css, chart_template, chart_fc, card_bg, card_text, card_sub, header_bg, header_border
-from utils.insights     import insight_card, insight_strip
+from utils.insights     import insight_card, insight_strip, no_data_info
 from utils.cascade      import (NODES, NODE_MAP, DEPS, TEAM_COLORS, TEAM_LABELS,
                                 STRUCTURAL, build_flowchart, build_timeline,
                                 measured_no_data_nodes, orphan_milestone_summary)
@@ -220,6 +220,12 @@ with ctrl_col:
             {s['pct_late']:.0f}% had this activity running late
           </div>
         </div>""", unsafe_allow_html=True)
+    else:
+        st.warning(
+            f"⚠️ **{selected}** has fewer than 50 recorded flights — the Departure Impact "
+            "number above is a rough fallback estimate, not a fitted model. Treat it as "
+            "indicative only."
+        )
 
     # ── Cascade summary bullets ──
     affected = sorted(
@@ -596,3 +602,5 @@ if selected in activity_stats and delay_val > 0:
       </span>
     </div>
     """, unsafe_allow_html=True)
+elif delay_val > 0:
+    no_data_info(f"Recovery Guidance for {selected}", n=0, min_n=50)

@@ -71,7 +71,8 @@ def build_flight_options(_df, carrier_col, iata_col, sched_col):
 
     if sched_col in sample_df.columns:
         sample_df = sample_df.sort_values(sched_col, ascending=False)
-        sched_str = pd.to_datetime(sample_df[sched_col], errors="coerce").dt.strftime("%d %b %Y %H:%M")
+        sched_str = (pd.to_datetime(sample_df[sched_col], errors="coerce", utc=True)
+                     .dt.tz_convert("Asia/Singapore").dt.strftime("%d %b %Y %H:%M"))
     else:
         sched_str = pd.Series("", index=sample_df.index)
 
@@ -181,8 +182,10 @@ c4.metric("Destination", str(flight.get("destination_iata",  "N/A")))
 sched_dep = flight.get("departure_offBlock.scheduled")
 actual_dep = flight.get("departure_offBlock.actual")
 try:
-    sched_str  = pd.to_datetime(sched_dep).strftime("%H:%M") if pd.notna(sched_dep) else "N/A"
-    actual_str = pd.to_datetime(actual_dep).strftime("%H:%M") if pd.notna(actual_dep) else "N/A"
+    sched_str  = (pd.to_datetime(sched_dep, utc=True).tz_convert("Asia/Singapore").strftime("%H:%M")
+                  if pd.notna(sched_dep) else "N/A")
+    actual_str = (pd.to_datetime(actual_dep, utc=True).tz_convert("Asia/Singapore").strftime("%H:%M")
+                  if pd.notna(actual_dep) else "N/A")
 except Exception:
     sched_str = actual_str = "N/A"
 

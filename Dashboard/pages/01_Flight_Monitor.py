@@ -218,6 +218,10 @@ if risk_filter == "High risk only (Delayed prob > 50%)":
 elif risk_filter == "Any risk (Delayed prob > 30%)":
     monitor_df = monitor_df[monitor_df["_delay_prob"] > 30]
 
+if monitor_df.empty:
+    st.info("📊 No flights match the current risk filter — try \"All flights\" or widen the other filters.")
+    st.stop()
+
 # ── Summary insight row ────────────────────────────────────────────────────────
 if not monitor_df.empty:
     n_high_risk  = (monitor_df["_delay_prob"] > 50).sum()
