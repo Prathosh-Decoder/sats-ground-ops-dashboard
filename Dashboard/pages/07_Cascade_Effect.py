@@ -444,6 +444,13 @@ def find_indirect_correlations(_df, direct_pairs):
     """
     Returns pairs of activities with high pairwise delay correlation
     that are NOT in the direct DEPS graph.
+
+    Vectorized: a single df.corr() call + one matrix-multiply for pairwise
+    non-null counts, instead of an O(N^2) Python loop that built a fresh
+    3-column DataFrame and called .corr() three times per pair (was ~2,800
+    calls on the production dataset — the source of both slow loads and a
+    wall of "invalid value encountered in divide" warnings from numpy under
+    the hood, since many point-milestone columns are near-constant).
     """
     if "Target_Departure_Delay_mins" not in _df.columns:
         return pd.DataFrame()
@@ -456,12 +463,27 @@ def find_indirect_correlations(_df, direct_pairs):
 
     # Keep only columns with enough data
     valid = [c for c in delay_cols if _df[c].dropna().__len__() >= 100]
+    if not valid:
+        return pd.DataFrame()
 
     # Build name → column map
     def col_to_name(c):
         return c.replace("_analysis_Delay_mins", "").replace("milestone_", "").replace("_", " ").title()
 
-    dep_target = _df["Target_Departure_Delay_mins"]
+    target_col = "Target_Departure_Delay_mins"
+    all_cols   = valid + [target_col]
+    sub        = _df[all_cols]
+
+    # One vectorized correlation matrix instead of thousands of Series.corr() calls.
+    # Zero-variance columns produce NaN cells (harmless) rather than a printed
+    # warning per pair.
+    with np.errstate(invalid="ignore", divide="ignore"):
+        corr_matrix = sub.corr()
+
+    # Pairwise non-null counts via matrix multiply — replaces per-pair .dropna().
+    notna       = sub.notna().to_numpy(dtype=np.int32)
+    pair_counts = notna.T @ notna
+    dep_idx     = len(valid)  # index of target_col in all_cols / corr_matrix
 
     rows = []
     for i in range(len(valid)):
@@ -470,27 +492,28 @@ def find_indirect_correlations(_df, direct_pairs):
             na, nb = col_to_name(ca), col_to_name(cb)
 
             # Check if this pair (or reverse) is a direct DEPS edge
-            is_direct = (na, nb) in direct_pairs or (nb, na) in direct_pairs
-            if is_direct:
+            if (na, nb) in direct_pairs or (nb, na) in direct_pairs:
                 continue
 
-            common = _df[[ca, cb, "Target_Departure_Delay_mins"]].dropna()
-            if len(common) < 80:
+            n_common = int(pair_counts[i, j])
+            if n_common < 80:
                 continue
 
-            corr_ab  = common[ca].corr(common[cb])
-            corr_a_d = common[ca].corr(common["Target_Departure_Delay_mins"])
-            corr_b_d = common[cb].corr(common["Target_Departure_Delay_mins"])
+            corr_ab = corr_matrix.iat[i, j]
+            if pd.isna(corr_ab) or abs(corr_ab) < 0.25:
+                continue
 
-            if abs(corr_ab) >= 0.25:
-                rows.append({
-                    "Activity A":            na,
-                    "Activity B":            nb,
-                    "Correlation A↔B":       round(corr_ab, 3),
-                    "A → Departure corr":    round(corr_a_d, 3),
-                    "B → Departure corr":    round(corr_b_d, 3),
-                    "n":                     len(common),
-                })
+            corr_a_d = corr_matrix.iat[i, dep_idx]
+            corr_b_d = corr_matrix.iat[j, dep_idx]
+
+            rows.append({
+                "Activity A":            na,
+                "Activity B":            nb,
+                "Correlation A↔B":       round(float(corr_ab), 3),
+                "A → Departure corr":    round(float(corr_a_d), 3) if pd.notna(corr_a_d) else None,
+                "B → Departure corr":    round(float(corr_b_d), 3) if pd.notna(corr_b_d) else None,
+                "n":                     n_common,
+            })
 
     if not rows:
         return pd.DataFrame()

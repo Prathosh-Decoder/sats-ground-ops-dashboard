@@ -113,8 +113,8 @@ def attribute_flight(row) -> str:
     incoming  = row.get("Incoming_Delay_mins",      np.nan)
     deficient = row.get("Is_Ground_Time_Deficient",  np.nan)
     gt_ratio  = row.get("Ground_Time_Ratio",         np.nan)
-    lw_ground = int(row.get("LW_In_Ground_Window",   0))
-    lw_dep    = int(row.get("LW_Active_At_Departure", 0))
+    lw_ground = int(row.get("LW_Active_During_Ground_Time",   0))
+    lw_dep    = int(row.get("LW_Active_At_Sched_Departure", 0))
 
     lw_active     = (lw_ground == 1 or lw_dep == 1)
     late_incoming = pd.notna(incoming) and incoming > PROPAGATED_THRESHOLD
@@ -380,7 +380,7 @@ else:
     lw_avg_delay    = lw_flights[lw_flights["Target_Departure_Delay_Class"] == "Delayed"]["Target_Departure_Delay_mins"].clip(upper=120).mean()
     no_lw_avg_delay = no_lw_flights[no_lw_flights["Target_Departure_Delay_Class"] == "Delayed"]["Target_Departure_Delay_mins"].clip(upper=120).mean() if len(no_lw_flights) > 0 else 0
 
-    lw_gw_flights = valid[valid["LW_In_Ground_Window"] == 1]
+    lw_gw_flights = valid[valid["LW_Active_During_Ground_Time"] == 1]
     lw_gw_delay_rate = (lw_gw_flights["Target_Departure_Delay_Class"] == "Delayed").mean() * 100 if len(lw_gw_flights) > 0 else 0
 
     lk1, lk2, lk3, lk4 = st.columns(4)
@@ -424,7 +424,7 @@ else:
         st.markdown("#### Avg Departure Delay by LW Overlap")
         valid2 = valid.dropna(subset=["Target_Departure_Delay_mins"]).copy()
         valid2["LW_Overlap_Bin"] = pd.cut(
-            valid2["LW_Overlap_Ground_Mins"],
+            valid2["LW_Overlap_With_Ground_Window_Mins"],
             bins=[-0.01, 0, 10, 20, 9999],
             labels=["0 min (no overlap)", "1–10 min", "11–20 min", ">20 min"],
         )
@@ -499,11 +499,11 @@ else:
     )
 
     if "Hour_of_Day" in valid.columns:
-        hour_lw   = valid[valid["LW_Active_At_Departure"] == 1].groupby("Hour_of_Day").agg(
+        hour_lw   = valid[valid["LW_Active_At_Sched_Departure"] == 1].groupby("Hour_of_Day").agg(
             delay_rate=("Target_Departure_Delay_Class", lambda x: (x == "Delayed").mean() * 100),
             n=("Target_Departure_Delay_Class", "count"),
         ).reset_index()
-        hour_nlw  = valid[valid["LW_Active_At_Departure"] == 0].groupby("Hour_of_Day").agg(
+        hour_nlw  = valid[valid["LW_Active_At_Sched_Departure"] == 0].groupby("Hour_of_Day").agg(
             delay_rate=("Target_Departure_Delay_Class", lambda x: (x == "Delayed").mean() * 100),
             n=("Target_Departure_Delay_Class", "count"),
         ).reset_index()
@@ -543,7 +543,7 @@ else:
             "identification_carrierCode", "identification_iata",
             "departure_offBlock.scheduled", "origin_terminal", "destination_iata",
             "Target_Departure_Delay_mins", "attribution",
-            "LW_In_Ground_Window", "LW_Overlap_Ground_Mins", "LW_Active_At_Departure",
+            "LW_Active_During_Ground_Time", "LW_Overlap_With_Ground_Window_Mins", "LW_Active_At_Sched_Departure",
         ] if c in lw_attributed.columns]
         disp = lw_attributed[show_cols].copy()
         disp.rename(columns={
@@ -554,9 +554,9 @@ else:
             "destination_iata":           "Dest",
             "Target_Departure_Delay_mins": "Delay (min)",
             "attribution":                "Attribution",
-            "LW_In_Ground_Window":        "LW in GW",
-            "LW_Overlap_Ground_Mins":     "LW Overlap (min)",
-            "LW_Active_At_Departure":     "LW at Dep",
+            "LW_Active_During_Ground_Time":        "LW in GW",
+            "LW_Overlap_With_Ground_Window_Mins":     "LW Overlap (min)",
+            "LW_Active_At_Sched_Departure":     "LW at Dep",
         }, inplace=True)
         if "Delay (min)" in disp.columns:
             disp["Delay (min)"] = disp["Delay (min)"].round(1)
