@@ -16,7 +16,7 @@ import streamlit as st
 
 from utils.loader       import load_data, render_date_filters
 from utils.style        import inject_css, chart_template, chart_fc, chart_gc, is_light, card_bg, card_text, card_sub, header_bg, header_border
-from utils.insights     import insight_card, insight_strip
+from utils.insights     import insight_card, insight_strip, no_data_metric
 from utils.cascade      import (NODES, NODE_MAP, TEAM_COLORS, TEAM_LABELS, STRUCTURAL, ROUTES,
                                 COLUMN_HEADERS, COLUMN_BANDS_Y, DEPARTURE_NODE)
 from utils.cascade      import _wrap as _wrap_label
@@ -31,6 +31,10 @@ BU_ICONS = {
     "techramp": "🛠️", "ramp": "🔩", "pax": "🧳", "aic": "🧹",
     "cabin": "💺", "cargo": "📦", "baggage": "🛄", "security": "🔒", "loadctrl": "⚖️",
 }
+# A team-level average built from very few distinct measured activities isn't
+# representative of "the team," no matter how many flights back those
+# activities (matches the same threshold used on Activity Analysis).
+MIN_ACTIVITIES_PER_BU = 5
 
 # ── Data ─────────────────────────────────────────────────────────────────────
 df = load_data()
@@ -276,18 +280,36 @@ if bu_perf:
 render_xf_bar()
 st.markdown("### Business Units")
 bu_keys = list(bu_perf.keys())
+
+if not bu_keys:
+    st.info("📊 Not enough data in the current filter to analyse any Business Unit (need 50+ flights per activity).")
+    st.stop()
+
 bu_cols = st.columns(len(bu_keys))
 
 for bc, bu in zip(bu_cols, bu_keys):
     info    = bu_perf[bu]
     active  = st.session_state["bui_bu"] == bu
     color   = info["color"]
-    pct_ok  = 100 - info["pct_late"]
-    bar_color = "#e74c3c" if info["pct_late"] > 40 else "#f39c12" if info["pct_late"] > 20 else "#2ecc71"
+    _n_acts_card = len(info.get("activities", []))
+    _enough      = _n_acts_card >= MIN_ACTIVITIES_PER_BU
+    pct_ok  = 100 - info["pct_late"] if _enough else 0
+    bar_color = ("#e74c3c" if info["pct_late"] > 40 else "#f39c12" if info["pct_late"] > 20 else "#2ecc71") if _enough else "#6b7fa3"
     border_style = f"3px solid {color}" if active else f"1px solid {color}44"
     bg_style     = (f"rgba(0,0,0,0.08)" if is_light() else f"rgba(0,0,0,0.5)") if active else (
                     "rgba(0,0,0,0.03)" if is_light() else "rgba(255,255,255,0.02)")
     bar_track    = "rgba(0,0,0,0.08)" if is_light() else "rgba(255,255,255,0.06)"
+    _metric_html = (
+        f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:1.1rem;'
+        f'font-weight:700;color:{bar_color}">{pct_ok:.0f}%</div>'
+        f'<div style="font-size:0.62rem;color:{card_sub()};margin-bottom:6px">on-time</div>'
+        f'<div style="background:{bar_track};border-radius:3px;height:3px">'
+        f'<div style="background:{bar_color};width:{pct_ok:.0f}%;height:100%;border-radius:3px"></div></div>'
+        if _enough else
+        f'<div style="font-size:0.85rem;font-weight:700;color:{bar_color}">No data</div>'
+        f'<div style="font-size:0.62rem;color:{card_sub()};margin-bottom:6px">'
+        f'only {_n_acts_card} activities tracked</div>'
+    )
 
     with bc:
         st.markdown(f"""
@@ -297,12 +319,7 @@ for bc, bu in zip(bu_cols, bu_keys):
           <div style="font-size:1.4rem">{info['icon']}</div>
           <div style="font-size:0.78rem;font-weight:700;color:{card_text()};
                       margin:4px 0 2px;letter-spacing:0.3px">{info['label']}</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;
-                      font-weight:700;color:{bar_color}">{pct_ok:.0f}%</div>
-          <div style="font-size:0.62rem;color:{card_sub()};margin-bottom:6px">on-time</div>
-          <div style="background:{bar_track};border-radius:3px;height:3px">
-            <div style="background:{bar_color};width:{pct_ok:.0f}%;height:100%;border-radius:3px"></div>
-          </div>
+          {_metric_html}
         </div>
         """, unsafe_allow_html=True)
         if st.button(
@@ -340,10 +357,15 @@ with left_col:
 
     # KPI row
     k1, k2, k3 = st.columns(3)
-    k1.metric("On-Time",   f"{100 - bu_info.get('pct_late', 0):.0f}%")
-    k2.metric("Avg Delay", f"{bu_info.get('avg_delay', 0):.1f} min")
-    coef_val = bu_info.get("avg_coef", 0)
-    k3.metric("Dep Impact", f"{coef_val:.2f}x")
+    _n_bu_acts = len(bu_activities)
+    if _n_bu_acts < MIN_ACTIVITIES_PER_BU:
+        with k1: no_data_metric("On-Time", _n_bu_acts, min_n=MIN_ACTIVITIES_PER_BU)
+        with k2: no_data_metric("Avg Delay", _n_bu_acts, min_n=MIN_ACTIVITIES_PER_BU)
+        with k3: no_data_metric("Dep Impact", _n_bu_acts, min_n=MIN_ACTIVITIES_PER_BU)
+    else:
+        k1.metric("On-Time",   f"{100 - bu_info.get('pct_late', 0):.0f}%")
+        k2.metric("Avg Delay", f"{bu_info.get('avg_delay', 0):.1f} min")
+        k3.metric("Dep Impact", f"{bu_info.get('avg_coef', 0):.2f}x")
 
     st.markdown("#### Activities")
     st.caption("Select an activity to see its full analysis below.")
@@ -398,7 +420,7 @@ with right_col:
     )
 
     # Downstream impact summary for selected BU
-    if bu_activities:
+    if len(bu_activities) >= MIN_ACTIVITIES_PER_BU:
         avg_coef = bu_info.get("avg_coef", 0)
         impact_color = "#e74c3c" if avg_coef > 0.5 else "#f39c12" if avg_coef > 0.2 else "#2ecc71"
         st.markdown(f"""
@@ -412,6 +434,8 @@ with right_col:
           </span>
         </div>
         """, unsafe_allow_html=True)
+    elif bu_activities:
+        st.caption(f"ℹ️ Not enough tracked activities ({len(bu_activities)}) for a reliable downstream-impact estimate.")
 
 # ── Activity deep-dive (shown below when activity selected) ───────────────────
 sel_activity = st.session_state.get("bui_activity")

@@ -13,7 +13,8 @@ import streamlit as st
 
 from utils.loader       import load_data, get_activity_stats, render_date_filters
 from utils.style        import inject_css, chart_template, chart_fc, card_bg, card_text, card_sub
-from utils.insights     import insight_card, insight_strip, compute_activity_stats
+from utils.insights     import (insight_card, insight_strip, compute_activity_stats,
+                                no_data_card, no_data_info, no_data_metric, has_enough_data)
 from utils.cascade      import NODES as _CASCADE_NODES, DEPS as _CASCADE_DEPS
 from utils.crossfilter  import init_xf, apply_xf, render_xf_bar
 
@@ -75,20 +76,35 @@ def back_to_bu():
     st.session_state["selected_activity"] = None
 
 # ─── BU stats aggregation ────────────────────────────────────────────────────
+# A BU-level average built from very few distinct activities isn't
+# representative of "the team" no matter how many flights back those
+# activities (each activity already needs 50+ flights to appear at all, so
+# summing counts is trivially satisfied and doesn't catch this). Require at
+# least this many distinct measured activities before showing a real number.
+MIN_ACTIVITIES_PER_BU = 5
+
 def get_bu_stats(stats_df):
     rows = []
     for bu, info in BU_INFO.items():
         bu_activities = stats_df[stats_df["team_clean"] == bu]
         if bu_activities.empty:
             continue
+        counts = bu_activities["count"]
+        total_count = int(counts.sum())
+        # Flight-count-weighted average — an activity with more recorded
+        # flights should count for more than one with barely 50, unlike a
+        # flat .mean() across activities.
+        avg_delay     = float((bu_activities["avg_delay_mins"] * counts).sum() / total_count)
+        avg_late_rate = float((bu_activities["late_rate"]      * counts).sum() / total_count)
         rows.append({
             "bu":           bu,
             "label":        info["label"],
             "icon":         info["icon"],
             "color":        info["color"],
             "n_activities": len(bu_activities),
-            "avg_delay":    bu_activities["avg_delay_mins"].mean(),
-            "avg_late_rate":bu_activities["late_rate"].mean(),
+            "total_count":  total_count,
+            "avg_delay":    avg_delay,
+            "avg_late_rate":avg_late_rate,
             "worst_activity": bu_activities.sort_values("avg_delay_mins", ascending=False).iloc[0]["activity"],
         })
     return pd.DataFrame(rows)
@@ -268,7 +284,8 @@ if st.session_state["selected_activity"]:
             if "identification_iata" in pin_df.columns:
                 pin_df["Flight"] = pin_df["identification_iata"]
             if "departure_offBlock.scheduled" in pin_df.columns:
-                _psched = pd.to_datetime(pin_df["departure_offBlock.scheduled"], errors="coerce", utc=True)
+                _psched = pd.to_datetime(pin_df["departure_offBlock.scheduled"], errors="coerce", utc=True) \
+                    .dt.tz_convert("Asia/Singapore")
                 pin_df["Date"] = _psched.dt.strftime("%Y-%m-%d")
                 pin_df["Dep Time"] = _psched.dt.strftime("%H:%M")
             if "origin_terminal" in pin_df.columns:
@@ -782,7 +799,8 @@ if st.session_state["selected_bu"]:
     if not bu_acts.empty:
         _worst_act = bu_acts.iloc[0]
         _best_act  = bu_acts.iloc[-1]
-        _avg_late  = bu_acts["late_rate"].mean() * 100
+        # Flight-count-weighted, not a flat mean across activities
+        _avg_late  = (bu_acts["late_rate"] * bu_acts["count"]).sum() / bu_acts["count"].sum() * 100
         insight_card(
             problem=(f"Within **{bu_info['label']}**, the slowest activity is "
                      f"**{_worst_act['activity'].split(': ')[-1]}** — on average it exceeded "
@@ -800,9 +818,22 @@ if st.session_state["selected_bu"]:
 
     # KPI row
     k1, k2, k3 = st.columns(3)
-    k1.metric("Avg Delay Across Activities", f"{bu_acts['avg_delay_mins'].mean():.1f} min")
-    k2.metric("Avg Late Rate", f"{bu_acts['late_rate'].mean()*100:.1f}%")
-    k3.metric("Worst Activity", bu_acts.iloc[0]["activity"].split(": ")[-1] if not bu_acts.empty else "—")
+    _n_acts = len(bu_acts)
+    if bu_acts.empty:
+        with k1: no_data_metric("Avg Delay Across Activities", 0, min_n=1)
+        with k2: no_data_metric("Avg Late Rate", 0, min_n=1)
+        k3.metric("Worst Activity", "—")
+    elif _n_acts < MIN_ACTIVITIES_PER_BU:
+        with k1: no_data_metric("Avg Delay Across Activities", _n_acts, min_n=MIN_ACTIVITIES_PER_BU)
+        with k2: no_data_metric("Avg Late Rate", _n_acts, min_n=MIN_ACTIVITIES_PER_BU)
+        k3.metric("Worst Activity", bu_acts.iloc[0]["activity"].split(": ")[-1])
+    else:
+        _w = bu_acts["count"]
+        k1.metric("Avg Delay Across Activities",
+                 f"{(bu_acts['avg_delay_mins'] * _w).sum() / _w.sum():.1f} min")
+        k2.metric("Avg Late Rate",
+                 f"{(bu_acts['late_rate'] * _w).sum() / _w.sum() * 100:.1f}%")
+        k3.metric("Worst Activity", bu_acts.iloc[0]["activity"].split(": ")[-1])
 
     st.divider()
 
@@ -999,27 +1030,33 @@ if not bu_stats.empty:
             row = bu_stats.iloc[idx]
             color = row["color"]
             late_pct = row["avg_late_rate"] * 100
+            n_acts = int(row["n_activities"])
             with col:
-                st.markdown(
-                    f"""<div style="background:{card_bg()};border:1px solid {color}33;
-                        border-top:4px solid {color};border-radius:12px;
-                        padding:16px 18px;margin-bottom:8px">
-                      <div style="font-size:1.5rem">{row['icon']}</div>
-                      <div style="font-size:1rem;font-weight:700;color:{card_text()};margin:6px 0">
-                        {row['label']}
-                      </div>
-                      <div style="font-size:1.6rem;font-weight:900;color:{color}">
-                        {row['avg_delay']:.1f} min
-                      </div>
-                      <div style="font-size:.75rem;color:{card_sub()};margin:4px 0">
-                        avg delay · {late_pct:.0f}% late rate
-                      </div>
-                      <div style="font-size:.72rem;color:{card_sub()};margin-top:6px">
-                        {int(row['n_activities'])} activities tracked
-                      </div>
-                    </div>""",
-                    unsafe_allow_html=True,
-                )
+                if n_acts < MIN_ACTIVITIES_PER_BU:
+                    no_data_card(
+                        row["label"], n_acts, icon=row["icon"], min_n=MIN_ACTIVITIES_PER_BU,
+                    )
+                else:
+                    st.markdown(
+                        f"""<div style="background:{card_bg()};border:1px solid {color}33;
+                            border-top:4px solid {color};border-radius:12px;
+                            padding:16px 18px;margin-bottom:8px">
+                          <div style="font-size:1.5rem">{row['icon']}</div>
+                          <div style="font-size:1rem;font-weight:700;color:{card_text()};margin:6px 0">
+                            {row['label']}
+                          </div>
+                          <div style="font-size:1.6rem;font-weight:900;color:{color}">
+                            {row['avg_delay']:.1f} min
+                          </div>
+                          <div style="font-size:.75rem;color:{card_sub()};margin:4px 0">
+                            avg delay · {late_pct:.0f}% late rate
+                          </div>
+                          <div style="font-size:.72rem;color:{card_sub()};margin-top:6px">
+                            {n_acts} activities tracked
+                          </div>
+                        </div>""",
+                        unsafe_allow_html=True,
+                    )
                 if st.button(f"View {row['label']} →", key=f"bu_btn_{row['bu']}"):
                     st.session_state["selected_bu"] = row["bu"]
                     st.session_state["selected_activity"] = None
@@ -1030,8 +1067,11 @@ st.divider()
 # ── Cross-BU comparison chart ─────────────────────────────────────────────────
 st.markdown("### Average Delay by Business Unit")
 
-if not bu_stats.empty:
-    bu_sorted = bu_stats.sort_values("avg_delay", ascending=True)
+_bu_reliable = bu_stats[bu_stats["n_activities"] >= MIN_ACTIVITIES_PER_BU]
+_bu_excluded = bu_stats[bu_stats["n_activities"] < MIN_ACTIVITIES_PER_BU]
+
+if not _bu_reliable.empty:
+    bu_sorted = _bu_reliable.sort_values("avg_delay", ascending=True)
     bu_bar = go.Figure(go.Bar(
         y=bu_sorted["label"],
         x=bu_sorted["avg_delay"],
@@ -1048,6 +1088,14 @@ if not bu_stats.empty:
         xaxis=dict(range=[0, bu_sorted["avg_delay"].max() * 1.25]),
     )
     st.plotly_chart(bu_bar, use_container_width=True)
+else:
+    no_data_info("Average Delay by Business Unit", n=0, min_n=MIN_ACTIVITIES_PER_BU)
+
+if not _bu_excluded.empty:
+    st.caption(
+        f"ℹ️ Not shown (fewer than {MIN_ACTIVITIES_PER_BU} tracked activities): "
+        + ", ".join(_bu_excluded["label"].tolist())
+    )
 
 st.divider()
 
@@ -1099,6 +1147,8 @@ if bu_perf_rows:
         yaxis_title="% of milestone completions",
     )
     st.plotly_chart(stacked, use_container_width=True)
+else:
+    no_data_info("On-Time Performance by Business Unit", n=0, min_n=50)
 
 st.divider()
 
@@ -1154,6 +1204,8 @@ if not bubble_data.empty:
         legend=dict(title="Business Unit"),
     )
     st.plotly_chart(bubble_fig, use_container_width=True)
+else:
+    no_data_info("Activity Risk Matrix", n=0, min_n=50)
 
 st.divider()
 
