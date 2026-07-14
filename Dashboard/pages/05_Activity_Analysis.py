@@ -922,6 +922,7 @@ if st.session_state["selected_bu"]:
         _summary_rows.append({
             "Activity":          _ar["activity"].split(": ")[-1],
             "Flights":           _n_flights,
+            "Times Recorded":    _n_flights,
             "% Finish Late":     round(_pct_finish_late, 1),
             "% Start Late":      round(_pct_start_late, 1) if _pct_start_late is not None else "No data",
             "% Duration Over":   round(_pct_dur_exceeded, 1) if _pct_dur_exceeded is not None else "No data",
@@ -945,7 +946,7 @@ if st.session_state["selected_bu"]:
         _styled = (
             _sum_df.style
             .map(_color_pct, subset=["% Finish Late", "% Start Late", "% Duration Over"])
-            .format({"Flights": "{:,}", "Avg Finish Delay": "{:.1f}", "Avg Start Delay": "{}", "Avg Dur Overrun": "{}"})
+            .format({"Flights": "{:,}", "Times Recorded": "{:,}", "Avg Finish Delay": "{:.1f}", "Avg Start Delay": "{}", "Avg Dur Overrun": "{}"})
         )
         st.dataframe(_styled, use_container_width=True, hide_index=True)
 
