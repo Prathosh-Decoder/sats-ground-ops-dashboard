@@ -58,34 +58,18 @@ numeric_feats = model.get("numeric_feats", [])
 cat_feats     = model.get("categorical_feats", [])
 
 # ── Sidebar filters ───────────────────────────────────────────────────────────
-# Date/Terminal/Aircraft Type/ICAO/Destination all come from render_date_filters
-# above (shared, persists across pages). Only Flight Monitor's own extra
-# filters (Carrier, Day of Week, risk/conditions) are added here.
+# Date/Carrier/Terminal/Aircraft Type/ICAO/Destination/Day of Week/Tight Ground
+# Time/Incoming Delay all come from render_date_filters above (shared, persists
+# across pages). Only Flight Monitor's own unique controls are added here.
 with st.sidebar:
     st.markdown("### 🛫 Flight Filters")
 
     n_flights = st.number_input("Flights to show", 20, 500, 100, step=20)
 
-    st.markdown("#### Carrier")
-    carriers = sorted(df["identification_carrierCode"].dropna().unique().tolist()) if "identification_carrierCode" in df.columns else []
-    sel_carrier = st.multiselect("Carrier", carriers, placeholder="All carriers", key="slicer_carrier_global")
-
-    day_opts = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
-    sel_days = st.multiselect("Day of Week", day_opts, placeholder="All days", key="slicer_dow_global")
-
-    st.markdown("#### Risk & Conditions")
+    st.markdown("#### Risk")
     risk_filter = st.selectbox(
         "Risk level",
         ["All flights", "High risk only (Delayed prob > 50%)", "Any risk (Delayed prob > 30%)"],
-    )
-
-    gt_tight_only = st.toggle("Tight ground time only", value=False,
-                               help="Show only flights where available ground time < minimum required")
-
-    incoming_min = st.slider(
-        "Minimum incoming delay (min)",
-        min_value=0, max_value=120, value=0, step=5,
-        help="Show only flights where inbound aircraft was at least this many minutes late. 0 = show all.",
     )
 
     st.divider()
@@ -111,16 +95,9 @@ with st.sidebar:
 st.divider()
 
 # ── Select & sort flights ─────────────────────────────────────────────────────
+# Carrier/Day of Week/Tight Ground Time/Incoming Delay are already applied to
+# df by render_date_filters() above.
 working = df.copy()
-
-if sel_carrier:
-    working = working[working["identification_carrierCode"].isin(sel_carrier)]
-if sel_days and "Day_of_Week" in working.columns:
-    working = working[working["Day_of_Week"].isin(sel_days)]
-if gt_tight_only and "Is_Ground_Time_Deficient" in working.columns:
-    working = working[working["Is_Ground_Time_Deficient"].isin([1, 1.0, "1"])]
-if incoming_min > 0 and "Incoming_Delay_mins" in working.columns:
-    working = working[working["Incoming_Delay_mins"].fillna(0) >= incoming_min]
 
 # Sort by most recent scheduled departure
 if "departure_offBlock.scheduled" in working.columns:

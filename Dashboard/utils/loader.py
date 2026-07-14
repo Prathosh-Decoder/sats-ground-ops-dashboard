@@ -149,6 +149,18 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
         # ── Operations section ────────────────────────────────────────────────
         st.markdown("### ✈️ Operations")
 
+        # Carrier / Airline
+        if "identification_carrierCode" in df.columns:
+            carrier_opts = sorted(
+                df["identification_carrierCode"].dropna().astype(str).unique().tolist()
+            )
+            carrier_opts = [c for c in carrier_opts if c not in ("nan", "None", "")]
+            sel_carrier = _multiselect_all(
+                "Carrier", options=carrier_opts, key="slicer_carrier_global"
+            )
+        else:
+            sel_carrier = []
+
         # Terminal
         if "origin_terminal" in df.columns:
             raw_terminals = sorted(
@@ -214,6 +226,26 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
         else:
             sel_dest = []
 
+        # ── Conditions section ────────────────────────────────────────────────
+        st.markdown("### ⚠️ Conditions")
+
+        if "Day_of_Week" in df.columns:
+            dow_opts = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            sel_dow = _multiselect_all("Day of Week", options=dow_opts, key="slicer_dow_global")
+        else:
+            sel_dow = []
+
+        gt_tight_only = st.toggle(
+            "Tight ground time only", value=False, key="slicer_gt_tight_global",
+            help="Show only flights where available ground time < minimum required",
+        )
+
+        incoming_min = st.slider(
+            "Minimum incoming delay (min)", min_value=0, max_value=120, value=0, step=5,
+            key="slicer_incoming_min_global",
+            help="Show only flights where inbound aircraft was at least this many minutes late. 0 = show all.",
+        )
+
         # ── Summary caption ───────────────────────────────────────────────────
         total_before = len(df)
 
@@ -226,6 +258,8 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
         df = df[df["_dep_month"].isin(sel_months)]
     if sel_days:
         df = df[df["_dep_date"].isin(sel_days)]
+    if sel_carrier:
+        df = df[df["identification_carrierCode"].astype(str).isin(sel_carrier)]
     if sel_terminal_raw:
         df = df[df["origin_terminal"].astype(str).isin(sel_terminal_raw)]
     if sel_body:
@@ -234,6 +268,12 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
         df = df[df["aircraft_typeICAO"].astype(str).isin(sel_icao)]
     if sel_dest:
         df = df[df["destination_iata"].astype(str).isin(sel_dest)]
+    if sel_dow and "Day_of_Week" in df.columns:
+        df = df[df["Day_of_Week"].isin(sel_dow)]
+    if gt_tight_only and "Is_Ground_Time_Deficient" in df.columns:
+        df = df[df["Is_Ground_Time_Deficient"].isin([1, 1.0, "1"])]
+    if incoming_min > 0 and "Incoming_Delay_mins" in df.columns:
+        df = df[df["Incoming_Delay_mins"].fillna(0) >= incoming_min]
 
     with st.sidebar:
         st.caption(f"{len(df):,} of {total_before:,} flights shown.")
