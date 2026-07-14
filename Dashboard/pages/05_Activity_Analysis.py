@@ -76,12 +76,11 @@ def back_to_bu():
     st.session_state["selected_activity"] = None
 
 # ─── BU stats aggregation ────────────────────────────────────────────────────
-# A BU-level average built from very few distinct activities isn't
-# representative of "the team" no matter how many flights back those
-# activities (each activity already needs 50+ flights to appear at all, so
-# summing counts is trivially satisfied and doesn't catch this). Require at
-# least this many distinct measured activities before showing a real number.
-MIN_ACTIVITIES_PER_BU = 5
+# A BU-level number is only reliable once the activities backing it have
+# recorded enough flights combined — number of distinct activities doesn't
+# matter (a BU with 2 well-recorded activities is fine; one with 5 barely-
+# recorded ones isn't).
+BU_MIN_TOTAL_FLIGHTS = 500
 
 def get_bu_stats(stats_df):
     rows = []
@@ -818,14 +817,14 @@ if st.session_state["selected_bu"]:
 
     # KPI row
     k1, k2, k3 = st.columns(3)
-    _n_acts = len(bu_acts)
+    _bu_total = int(bu_acts["count"].sum()) if not bu_acts.empty else 0
     if bu_acts.empty:
         with k1: no_data_metric("Avg Delay Across Activities", 0, min_n=1)
         with k2: no_data_metric("Avg Late Rate", 0, min_n=1)
         k3.metric("Worst Activity", "—")
-    elif _n_acts < MIN_ACTIVITIES_PER_BU:
-        with k1: no_data_metric("Avg Delay Across Activities", _n_acts, min_n=MIN_ACTIVITIES_PER_BU)
-        with k2: no_data_metric("Avg Late Rate", _n_acts, min_n=MIN_ACTIVITIES_PER_BU)
+    elif _bu_total < BU_MIN_TOTAL_FLIGHTS:
+        with k1: no_data_metric("Avg Delay Across Activities", _bu_total, min_n=BU_MIN_TOTAL_FLIGHTS)
+        with k2: no_data_metric("Avg Late Rate", _bu_total, min_n=BU_MIN_TOTAL_FLIGHTS)
         k3.metric("Worst Activity", bu_acts.iloc[0]["activity"].split(": ")[-1])
     else:
         _w = bu_acts["count"]
@@ -1031,10 +1030,11 @@ if not bu_stats.empty:
             color = row["color"]
             late_pct = row["avg_late_rate"] * 100
             n_acts = int(row["n_activities"])
+            bu_total = int(row["total_count"])
             with col:
-                if n_acts < MIN_ACTIVITIES_PER_BU:
+                if bu_total < BU_MIN_TOTAL_FLIGHTS:
                     no_data_card(
-                        row["label"], n_acts, icon=row["icon"], min_n=MIN_ACTIVITIES_PER_BU,
+                        row["label"], bu_total, icon=row["icon"], min_n=BU_MIN_TOTAL_FLIGHTS,
                     )
                 else:
                     st.markdown(
@@ -1067,8 +1067,8 @@ st.divider()
 # ── Cross-BU comparison chart ─────────────────────────────────────────────────
 st.markdown("### Average Delay by Business Unit")
 
-_bu_reliable = bu_stats[bu_stats["n_activities"] >= MIN_ACTIVITIES_PER_BU]
-_bu_excluded = bu_stats[bu_stats["n_activities"] < MIN_ACTIVITIES_PER_BU]
+_bu_reliable = bu_stats[bu_stats["total_count"] >= BU_MIN_TOTAL_FLIGHTS]
+_bu_excluded = bu_stats[bu_stats["total_count"] < BU_MIN_TOTAL_FLIGHTS]
 
 if not _bu_reliable.empty:
     bu_sorted = _bu_reliable.sort_values("avg_delay", ascending=True)
@@ -1089,11 +1089,11 @@ if not _bu_reliable.empty:
     )
     st.plotly_chart(bu_bar, use_container_width=True)
 else:
-    no_data_info("Average Delay by Business Unit", n=0, min_n=MIN_ACTIVITIES_PER_BU)
+    no_data_info("Average Delay by Business Unit", n=0, min_n=BU_MIN_TOTAL_FLIGHTS)
 
 if not _bu_excluded.empty:
     st.caption(
-        f"ℹ️ Not shown (fewer than {MIN_ACTIVITIES_PER_BU} tracked activities): "
+        f"ℹ️ Not shown (fewer than {BU_MIN_TOTAL_FLIGHTS:,} recorded flights): "
         + ", ".join(_bu_excluded["label"].tolist())
     )
 

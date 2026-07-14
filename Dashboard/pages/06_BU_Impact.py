@@ -31,10 +31,10 @@ BU_ICONS = {
     "techramp": "🛠️", "ramp": "🔩", "pax": "🧳", "aic": "🧹",
     "cabin": "💺", "cargo": "📦", "baggage": "🛄", "security": "🔒", "loadctrl": "⚖️",
 }
-# A team-level average built from very few distinct measured activities isn't
-# representative of "the team," no matter how many flights back those
-# activities (matches the same threshold used on Activity Analysis).
-MIN_ACTIVITIES_PER_BU = 5
+# A team-level number is only reliable once the activities backing it have
+# recorded enough flights combined — number of distinct activities doesn't
+# matter (matches the same threshold used on Activity Analysis).
+BU_MIN_TOTAL_FLIGHTS = 500
 
 # ── Data ─────────────────────────────────────────────────────────────────────
 df = load_data()
@@ -84,14 +84,19 @@ for team, label in TEAM_LABELS.items():
     nodes = [(n, s) for n, s in activity_stats.items() if s["team"] == team]
     if not nodes:
         continue
+    _w = np.array([s["n"] for _, s in nodes], dtype=float)
+    _wsum = _w.sum()
     bu_perf[team] = {
-        "label":     label,
-        "icon":      BU_ICONS.get(team, "⚙️"),
-        "color":     TEAM_COLORS[team],
-        "pct_late":  np.mean([s["pct_late"]  for _, s in nodes]),
-        "avg_delay": np.mean([s["mean_delay"] for _, s in nodes]),
-        "avg_coef":  np.mean([s["coef"]       for _, s in nodes]),
-        "activities":nodes,
+        "label":       label,
+        "icon":        BU_ICONS.get(team, "⚙️"),
+        "color":       TEAM_COLORS[team],
+        # Flight-count-weighted — an activity with more recorded flights
+        # should count for more than one with barely enough to qualify.
+        "pct_late":    float(np.sum([s["pct_late"]   for _, s in nodes] * _w) / _wsum),
+        "avg_delay":   float(np.sum([s["mean_delay"] for _, s in nodes] * _w) / _wsum),
+        "avg_coef":    float(np.sum([s["coef"]        for _, s in nodes] * _w) / _wsum),
+        "total_flights": int(_wsum),
+        "activities":  nodes,
     }
 
 # ── Flowchart ─────────────────────────────────────────────────────────────────
@@ -291,8 +296,8 @@ for bc, bu in zip(bu_cols, bu_keys):
     info    = bu_perf[bu]
     active  = st.session_state["bui_bu"] == bu
     color   = info["color"]
-    _n_acts_card = len(info.get("activities", []))
-    _enough      = _n_acts_card >= MIN_ACTIVITIES_PER_BU
+    _bu_total_card = info.get("total_flights", 0)
+    _enough      = _bu_total_card >= BU_MIN_TOTAL_FLIGHTS
     pct_ok  = 100 - info["pct_late"] if _enough else 0
     bar_color = ("#e74c3c" if info["pct_late"] > 40 else "#f39c12" if info["pct_late"] > 20 else "#2ecc71") if _enough else "#6b7fa3"
     border_style = f"3px solid {color}" if active else f"1px solid {color}44"
@@ -308,7 +313,7 @@ for bc, bu in zip(bu_cols, bu_keys):
         if _enough else
         f'<div style="font-size:0.85rem;font-weight:700;color:{bar_color}">No data</div>'
         f'<div style="font-size:0.62rem;color:{card_sub()};margin-bottom:6px">'
-        f'only {_n_acts_card} activities tracked</div>'
+        f'only {_bu_total_card:,} flights recorded</div>'
     )
 
     with bc:
@@ -357,11 +362,11 @@ with left_col:
 
     # KPI row
     k1, k2, k3 = st.columns(3)
-    _n_bu_acts = len(bu_activities)
-    if _n_bu_acts < MIN_ACTIVITIES_PER_BU:
-        with k1: no_data_metric("On-Time", _n_bu_acts, min_n=MIN_ACTIVITIES_PER_BU)
-        with k2: no_data_metric("Avg Delay", _n_bu_acts, min_n=MIN_ACTIVITIES_PER_BU)
-        with k3: no_data_metric("Dep Impact", _n_bu_acts, min_n=MIN_ACTIVITIES_PER_BU)
+    _bu_total = bu_info.get("total_flights", 0)
+    if _bu_total < BU_MIN_TOTAL_FLIGHTS:
+        with k1: no_data_metric("On-Time", _bu_total, min_n=BU_MIN_TOTAL_FLIGHTS)
+        with k2: no_data_metric("Avg Delay", _bu_total, min_n=BU_MIN_TOTAL_FLIGHTS)
+        with k3: no_data_metric("Dep Impact", _bu_total, min_n=BU_MIN_TOTAL_FLIGHTS)
     else:
         k1.metric("On-Time",   f"{100 - bu_info.get('pct_late', 0):.0f}%")
         k2.metric("Avg Delay", f"{bu_info.get('avg_delay', 0):.1f} min")
@@ -420,7 +425,7 @@ with right_col:
     )
 
     # Downstream impact summary for selected BU
-    if len(bu_activities) >= MIN_ACTIVITIES_PER_BU:
+    if bu_info.get("total_flights", 0) >= BU_MIN_TOTAL_FLIGHTS:
         avg_coef = bu_info.get("avg_coef", 0)
         impact_color = "#e74c3c" if avg_coef > 0.5 else "#f39c12" if avg_coef > 0.2 else "#2ecc71"
         st.markdown(f"""
