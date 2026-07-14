@@ -172,6 +172,39 @@ for i, (idx, row) in enumerate(working.iterrows()):
     else:
         std_str = "—"
 
+    # ATD (Actual Departure / Off Block) in SGT (UTC+8)
+    atd_raw = row.get("departure_offBlock.actual", pd.NaT)
+    if pd.notna(atd_raw):
+        try:
+            atd_sgt = pd.to_datetime(atd_raw, utc=True).tz_convert("Asia/Singapore")
+            atd_str = atd_sgt.strftime("%d %b  %H:%M")
+        except Exception:
+            atd_str = str(atd_raw)[:16]
+    else:
+        atd_str = "—"
+
+    # STA (Planned Arrival) in SGT (UTC+8)
+    sta_raw = row.get("linkedFlight_arrival.inBlock.scheduled", pd.NaT)
+    if pd.notna(sta_raw):
+        try:
+            sta_sgt = pd.to_datetime(sta_raw, utc=True).tz_convert("Asia/Singapore")
+            sta_str = sta_sgt.strftime("%d %b  %H:%M")
+        except Exception:
+            sta_str = str(sta_raw)[:16]
+    else:
+        sta_str = "—"
+
+    # ATA (Actual Arrival) in SGT (UTC+8)
+    ata_raw = row.get("linkedFlight_arrival.inBlock.actual", pd.NaT)
+    if pd.notna(ata_raw):
+        try:
+            ata_sgt = pd.to_datetime(ata_raw, utc=True).tz_convert("Asia/Singapore")
+            ata_str = ata_sgt.strftime("%d %b  %H:%M")
+        except Exception:
+            ata_str = str(ata_raw)[:16]
+    else:
+        ata_str = "—"
+
     incoming = row.get("Incoming_Delay_mins", np.nan)
     gt_avail = row.get("Available_Ground_Time_mins", np.nan)
     gt_defic = row.get("Is_Ground_Time_Deficient", np.nan)
@@ -196,7 +229,10 @@ for i, (idx, row) in enumerate(working.iterrows()):
         "Body":           str(row.get("aircraft_bodyType", "—")),
         "Destination":    str(row.get("destination_iata", "—")),
         "Terminal":       str(row.get("origin_terminal", "—")),
+        "STA (SGT)":      sta_str,
+        "ATA (SGT)":      ata_str,
         "STD (SGT)":      std_str,
+        "ATD (SGT)":      atd_str,
         "Incoming Delay": f"{incoming:+.0f} min" if pd.notna(incoming) else "—",
         "GT Buffer":      f"{gt_avail:.0f} min"  if pd.notna(gt_avail) else "—",
         "GT Tight":       "⚠️ YES" if str(gt_defic) == "1" or gt_defic == 1.0 else "OK",
@@ -306,6 +342,10 @@ st.markdown("""
   <span><span style="color:#f39c12">■</span> 30–50% — monitor closely</span>
   <span><span style="color:#2ecc71">■</span> &lt; 30% — on track</span>
   <span style="margin-left:16px">
+    <b>STA</b> = Scheduled Arrival &nbsp;|&nbsp;
+    <b>ATA</b> = Actual Arrival (On Chock) &nbsp;|&nbsp;
+    <b>STD</b> = Scheduled Departure &nbsp;|&nbsp;
+    <b>ATD</b> = Actual Departure (Off Block) &nbsp;|&nbsp;
     <b>GT Tight</b> = ground time below minimum required &nbsp;|&nbsp;
     <b>Milestones</b> = % of milestone timestamps recorded
   </span>
