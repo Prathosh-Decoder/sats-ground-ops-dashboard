@@ -196,7 +196,7 @@ if "origin_terminal" in display_rows.columns:
 col_map = {
     "identification_iata":            "Flight",
     "Date":                           "Date",
-    "Dep Time":                       "Dep Time (UTC)",
+    "Dep Time":                       "Dep Time (SGT)",
     "Terminal":                       "Terminal",
     "destination_iata":               "Destination",
     "aircraft_typeICAO":              "Aircraft",

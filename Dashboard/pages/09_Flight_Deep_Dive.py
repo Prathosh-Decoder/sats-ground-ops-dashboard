@@ -65,7 +65,7 @@ iata_col    = "identification_iata"         if "identification_iata"         in 
 sched_col   = "departure_offBlock.scheduled"
 
 @st.cache_data(show_spinner="Loading flight list…")
-def build_flight_options(_df, carrier_col, iata_col, sched_col):
+def build_flight_options(_df, carrier_col, iata_col, sched_col, cache_key):
     sample_df = _df.dropna(subset=["Target_Departure_Delay_Class"]).copy()
     sample_df = sample_df[sample_df["Target_Departure_Delay_Class"] != "nan"]
 
@@ -89,7 +89,12 @@ def build_flight_options(_df, carrier_col, iata_col, sched_col):
     ids    = sample_df["id"].tolist()
     return labels, ids
 
-flight_labels, flight_ids = build_flight_options(df, carrier_col, iata_col, sched_col)
+
+# Cheap fingerprint of the filtered set (not the whole frame) so the cache
+# correctly busts when filters change instead of always returning whatever
+# was cached on the very first call.
+_cache_key = (len(df), int(pd.util.hash_pandas_object(df["id"], index=False).sum()))
+flight_labels, flight_ids = build_flight_options(df, carrier_col, iata_col, sched_col, _cache_key)
 
 id_to_label = dict(zip(flight_ids, flight_labels))
 label_to_id = {v: k for k, v in id_to_label.items()}

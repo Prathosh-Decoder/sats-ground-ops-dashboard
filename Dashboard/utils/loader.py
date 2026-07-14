@@ -5,6 +5,7 @@ Cached data and model loading utilities for the SATS dashboard.
 
 import os
 import pickle
+from datetime import time as _time, timedelta
 
 import numpy as np
 import pandas as pd
@@ -56,13 +57,27 @@ def load_data() -> pd.DataFrame:
             df[col] = pd.to_datetime(df[col], errors="coerce", utc=True)
 
     # Add date dimension columns for filtering
+    # Flight timestamps are stored UTC-naive; convert to SGT (UTC+8) first so
+    # "date"/"day" boundaries match the local calendar day, not the UTC one
+    # (a flight at 01:00 SGT is 17:00 UTC the previous day).
     if "departure_offBlock.scheduled" in df.columns:
-        sched = pd.to_datetime(df["departure_offBlock.scheduled"], errors="coerce", utc=True)
+        sched = pd.to_datetime(df["departure_offBlock.scheduled"], errors="coerce", utc=True) \
+            .dt.tz_convert("Asia/Singapore")
         df["_dep_date"]    = sched.dt.date
+        df["_dep_time"]    = sched.dt.time           # SGT clock time, for time-of-day filtering
         df["_dep_month"]   = sched.dt.month        # 1–12
         df["_dep_quarter"] = sched.dt.quarter      # 1–4
         df["_dep_year"]    = sched.dt.year
         df["_dep_week"]    = sched.dt.isocalendar().week.astype("Int64")  # ISO 1–53
+
+    # Actual arrival clock time (SGT) of the inbound aircraft — lets you ask
+    # "how many flights actually arrived, and how late, in this time window"
+    # (as opposed to _dep_time, which is about the outbound flight's schedule).
+    if "linkedFlight_arrival.inBlock.actual" in df.columns:
+        arr_actual = pd.to_datetime(
+            df["linkedFlight_arrival.inBlock.actual"], errors="coerce", utc=True
+        ).dt.tz_convert("Asia/Singapore")
+        df["_arr_time"] = arr_actual.dt.time
 
     return df
 
@@ -145,6 +160,48 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
                     key="slicer_day_global",
                 )
                 sel_days = [d for d, lbl in day_labels.items() if lbl in sel_day_labels]
+
+        # Specific date or range — independent of the Year/Quarter/Month cascade
+        # above, for picking one particular day or an arbitrary range directly.
+        sel_date_range = None
+        if "_dep_date" in df.columns:
+            _all_dates = df["_dep_date"].dropna()
+            if not _all_dates.empty:
+                _min_d, _max_d = _all_dates.min(), _all_dates.max()
+                sel_date_range = st.date_input(
+                    "Specific date or range",
+                    value=(_min_d, _max_d),
+                    min_value=_min_d, max_value=_max_d,
+                    key="slicer_date_range_global",
+                    help="Pick a single day or a range — applied on top of the filters above.",
+                )
+
+        # ── Time of Day section ─────────────────────────────────────────────────
+        st.markdown("### 🕐 Time of Day (SGT)")
+        sel_time_range = None
+        if "_dep_time" in df.columns:
+            sel_time_range = st.slider(
+                "Scheduled departure time",
+                min_value=_time(0, 0), max_value=_time(23, 59),
+                value=(_time(0, 0), _time(23, 59)),
+                step=timedelta(minutes=15),
+                key="slicer_time_range_global",
+                help="Show only flights whose scheduled departure clock time (Singapore time) "
+                     "falls in this range, regardless of date.",
+            )
+
+        sel_arr_time_range = None
+        if "_arr_time" in df.columns:
+            sel_arr_time_range = st.slider(
+                "Actual (inbound) arrival time",
+                min_value=_time(0, 0), max_value=_time(23, 59),
+                value=(_time(0, 0), _time(23, 59)),
+                step=timedelta(minutes=15),
+                key="slicer_arr_time_range_global",
+                help="Show only flights whose inbound aircraft actually arrived (Singapore time) "
+                     "in this window — use with 'Incoming Delay (min)' to see how late those "
+                     "arrivals were.",
+            )
 
         # ── Operations section ────────────────────────────────────────────────
         st.markdown("### ✈️ Operations")
@@ -258,6 +315,23 @@ def render_date_filters(df: pd.DataFrame, page_key: str = "default") -> pd.DataF
         df = df[df["_dep_month"].isin(sel_months)]
     if sel_days:
         df = df[df["_dep_date"].isin(sel_days)]
+    if sel_date_range and isinstance(sel_date_range, (list, tuple)) and len(sel_date_range) == 2:
+        _range_start, _range_end = sel_date_range
+        df = df[(df["_dep_date"] >= _range_start) & (df["_dep_date"] <= _range_end)]
+    if sel_time_range and "_dep_time" in df.columns:
+        _t_start, _t_end = sel_time_range
+        if (_t_start, _t_end) != (_time(0, 0), _time(23, 59)):
+            if _t_start <= _t_end:
+                df = df[(df["_dep_time"] >= _t_start) & (df["_dep_time"] <= _t_end)]
+            else:  # range wraps past midnight, e.g. 22:00-04:00
+                df = df[(df["_dep_time"] >= _t_start) | (df["_dep_time"] <= _t_end)]
+    if sel_arr_time_range and "_arr_time" in df.columns:
+        _at_start, _at_end = sel_arr_time_range
+        if (_at_start, _at_end) != (_time(0, 0), _time(23, 59)):
+            if _at_start <= _at_end:
+                df = df[(df["_arr_time"] >= _at_start) & (df["_arr_time"] <= _at_end)]
+            else:  # range wraps past midnight
+                df = df[(df["_arr_time"] >= _at_start) | (df["_arr_time"] <= _at_end)]
     if sel_carrier:
         df = df[df["identification_carrierCode"].astype(str).isin(sel_carrier)]
     if sel_terminal_raw:
