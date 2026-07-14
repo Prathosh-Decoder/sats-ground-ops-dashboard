@@ -10,10 +10,21 @@ Usage:
         action="Audit MI turnaround process — focus on ramp loading and pax boarding.",
         severity="red",
     )
+
+Not-enough-data guards:
+    from utils.insights import MIN_SAMPLE_SIZE, has_enough_data, no_data_metric, no_data_card, no_data_info
+    n = int(row["count"])   # the actual recorded-observation count for THIS specific
+                             # activity/milestone/BU — never the overall filtered flight total
+    if has_enough_data(n):
+        st.metric("Avg Delay", f"{avg:.1f} min")
+    else:
+        no_data_metric("Avg Delay", n)
 """
 import streamlit as st
 import numpy as np
 import pandas as pd
+
+from utils.style import card_bg, card_text, card_sub
 
 
 # ── Palette ────────────────────────────────────────────────────────────────────
@@ -23,6 +34,59 @@ _COLORS = {
     "green": ("#2ecc71", "rgba(46,204,113,0.09)", "rgba(46,204,113,0.18)"),
     "blue":  ("#1a73e8", "rgba(26,115,232,0.09)", "rgba(26,115,232,0.18)"),
 }
+
+
+# ── Not-enough-data guards ──────────────────────────────────────────────────────
+# App-wide: below this many recorded observations for a SPECIFIC activity/
+# milestone/BU, show "not enough data" instead of a real-looking but unstable
+# number. Always pass the actual recorded count for the thing being shown —
+# never the overall filtered flight total, and never another item's count.
+MIN_SAMPLE_SIZE = 50
+
+
+def has_enough_data(n, min_n: int = MIN_SAMPLE_SIZE) -> bool:
+    """True if `n` (the recorded-observation count for one specific
+    activity/milestone/BU) meets the reliability floor."""
+    try:
+        return n is not None and int(n) >= min_n
+    except (TypeError, ValueError):
+        return False
+
+
+def no_data_metric(label: str, n, min_n: int = MIN_SAMPLE_SIZE) -> None:
+    """Drop-in replacement for st.metric when there isn't enough data."""
+    n_disp = int(n) if pd.notna(n) else 0
+    st.metric(label, "—", help=f"Not enough data — only {n_disp:,} recorded (need {min_n}+).")
+
+
+def no_data_card(label: str, n, icon: str = "📊", min_n: int = MIN_SAMPLE_SIZE) -> None:
+    """Custom-HTML 'not enough data' card matching the app's existing card
+    shell (same shape as the BU/activity cards on Activity Analysis, BU
+    Impact, and Home), so a no-data card reads as a sibling of the real
+    cards rather than a jarring inline warning."""
+    n_disp = int(n) if pd.notna(n) else 0
+    st.markdown(
+        f"""<div style="background:{card_bg()};border-left:4px solid #6b7fa3;
+            border-radius:10px;padding:14px 16px;margin-bottom:8px">
+          <div style="font-size:.8rem;color:{card_sub()};text-transform:uppercase;letter-spacing:1px">
+            {icon} {label}
+          </div>
+          <div style="font-size:1.1rem;font-weight:700;color:{card_sub()};margin:6px 0">
+            No data
+          </div>
+          <div style="font-size:.72rem;color:{card_sub()}">
+            Only {n_disp:,} recorded — need {min_n}+ to show a reliable figure.
+          </div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+
+def no_data_info(label: str, n=0, min_n: int = MIN_SAMPLE_SIZE) -> None:
+    """st.info-style fallback for a chart/section that has too little data
+    to render meaningfully."""
+    n_disp = int(n) if pd.notna(n) else 0
+    st.info(f"📊 Not enough data for {label} — only {n_disp:,} recorded (need {min_n}+).")
 
 
 def insight_card(problem: str, impact: str, action: str,

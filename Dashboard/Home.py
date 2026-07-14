@@ -42,8 +42,8 @@ valid = valid[valid["Target_Departure_Delay_Class"].astype(str) != "nan"]
 total_flights = len(valid)
 n_delayed     = (valid["Target_Departure_Delay_Class"].astype(str) == "Delayed").sum()
 n_ontime      = (valid["Target_Departure_Delay_Class"].astype(str) == "On-Time").sum()
-on_time_pct   = n_ontime / total_flights * 100
-delay_pct     = n_delayed / total_flights * 100
+on_time_pct   = (n_ontime / total_flights * 100) if total_flights > 0 else 0.0
+delay_pct     = (n_delayed / total_flights * 100) if total_flights > 0 else 0.0
 
 avg_delay = np.nan
 if "Target_Departure_Delay_mins" in valid.columns:
@@ -59,7 +59,10 @@ if "Hour_of_Day" in valid.columns:
 sched = pd.to_datetime(df.get("departure_offBlock.scheduled"), errors="coerce", utc=True)
 date_min       = sched.min().strftime("%d %b %Y") if not pd.isna(sched.min()) else "—"
 date_max       = sched.max().strftime("%d %b %Y") if not pd.isna(sched.max()) else "—"
+has_delay_data = n_delayed > 0
 avg_delay_safe = float(avg_delay) if not np.isnan(avg_delay) else 0.0
+k4_animate_js  = (f"animateCounter('k4', {avg_delay_safe:.1f}, ' min', true, 1200);"
+                 if has_delay_data else "")
 
 # ─── Hero ─────────────────────────────────────────────────────────────────────
 components.html(f"""
@@ -198,7 +201,7 @@ components.html(f"""
     </div>
     <div class="kpi">
       <div class="kpi-lbl">Avg Delay</div>
-      <div class="kpi-num" id="k4">0 min</div>
+      <div class="kpi-num" id="k4">{'0 min' if has_delay_data else 'N/A'}</div>
       <div class="kpi-sub">among delayed flights</div>
     </div>
   </div>
@@ -224,7 +227,7 @@ window.addEventListener('load', () => {{
     animateCounter('k1', {total_flights}, '', false, 1400);
     animateCounter('k2', {on_time_pct:.1f}, '%', true,  1200);
     animateCounter('k3', {delay_pct:.1f},   '%', true,  1200);
-    animateCounter('k4', {avg_delay_safe:.1f}, ' min', true, 1200);
+    {k4_animate_js}
   }}, 300);
 }});
 </script>
@@ -394,6 +397,8 @@ if bu_stats:
                             border-radius:4px;box-shadow:0 0 6px {color}"></div>
               </div>
             </div>""", unsafe_allow_html=True)
+else:
+    st.info("📊 Not enough data yet to show a Team Performance Overview for any Business Unit.")
 
 # ─── Footer ──────────────────────────────────────────────────────────────────
 st.markdown(f"""

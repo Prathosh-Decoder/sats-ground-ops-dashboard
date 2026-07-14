@@ -15,7 +15,7 @@ import streamlit as st
 
 from utils.loader   import load_data
 from utils.style    import inject_css, chart_template, chart_fc, card_bg, card_text, card_sub, header_bg, header_border
-from utils.insights import insight_card
+from utils.insights import insight_card, no_data_info
 
 st.set_page_config(
     page_title="Data Quality | SATS",
@@ -63,6 +63,8 @@ df = load_data()
 @st.cache_data(show_spinner="Analysing data quality…")
 def compute_completeness(_df):
     total = len(_df)
+    if total == 0:
+        return pd.DataFrame(), 0
 
     # Key flight metadata columns
     meta_cols = {
@@ -159,6 +161,10 @@ def compute_completeness(_df):
     return pd.DataFrame(records), total
 
 quality_df, total_rows = compute_completeness(df)
+
+if quality_df.empty:
+    st.warning("No flights match the current filters — nothing to audit.")
+    st.stop()
 
 # Summary stats
 n_full    = (quality_df["status"] == "full").sum()
@@ -392,7 +398,10 @@ cov_fig.update_layout(
     margin=dict(l=10, r=100, t=20, b=40),
     bargap=0.18,
 )
-st.plotly_chart(cov_fig, use_container_width=True)
+if not delay_cov.empty:
+    st.plotly_chart(cov_fig, use_container_width=True)
+else:
+    no_data_info("Milestone Delay Coverage", n=0, min_n=1)
 
 st.divider()
 
@@ -442,27 +451,33 @@ with bu_left:
         title=dict(text="Average Milestone Coverage per Business Unit",
                    font=dict(size=11, color="#8899bb"), x=0.01),
     )
-    st.plotly_chart(bu_fig, use_container_width=True)
+    if not bu_cov.empty:
+        st.plotly_chart(bu_fig, use_container_width=True)
+    else:
+        no_data_info("Coverage by Business Unit", n=0, min_n=1)
 
 with bu_right:
     st.markdown("#### BU Summary Table")
-    bu_display = bu_cov[["label", "avg_pct", "n_cols", "n_full", "n_empty"]].copy()
-    bu_display.columns = ["Business Unit", "Avg Coverage %", "Total Cols", "Fully Complete", "Not Captured"]
-    bu_display = bu_display.sort_values("Avg Coverage %", ascending=False).reset_index(drop=True)
-    bu_display["Avg Coverage %"] = bu_display["Avg Coverage %"].round(1)
+    if bu_cov.empty:
+        no_data_info("BU Summary Table", n=0, min_n=1)
+    else:
+        bu_display = bu_cov[["label", "avg_pct", "n_cols", "n_full", "n_empty"]].copy()
+        bu_display.columns = ["Business Unit", "Avg Coverage %", "Total Cols", "Fully Complete", "Not Captured"]
+        bu_display = bu_display.sort_values("Avg Coverage %", ascending=False).reset_index(drop=True)
+        bu_display["Avg Coverage %"] = bu_display["Avg Coverage %"].round(1)
 
-    st.dataframe(
-        bu_display,
-        use_container_width=True,
-        hide_index=True,
-        height=300,
-        column_config={
-            "Avg Coverage %": st.column_config.ProgressColumn(
-                "Avg Coverage %", min_value=0, max_value=100, format="%.1f%%"),
-            "Fully Complete": st.column_config.NumberColumn("✅ Full"),
-            "Not Captured":   st.column_config.NumberColumn("❌ No Data"),
-        }
-    )
+        st.dataframe(
+            bu_display,
+            use_container_width=True,
+            hide_index=True,
+            height=300,
+            column_config={
+                "Avg Coverage %": st.column_config.ProgressColumn(
+                    "Avg Coverage %", min_value=0, max_value=100, format="%.1f%%"),
+                "Fully Complete": st.column_config.NumberColumn("✅ Full"),
+                "Not Captured":   st.column_config.NumberColumn("❌ No Data"),
+            }
+        )
 
 st.divider()
 
@@ -525,6 +540,8 @@ if "_dep_month" in df.columns and "_dep_year" in df.columns and active_delay_col
                              "Coverage %": st.column_config.ProgressColumn(
                                  format="%.1f%%", min_value=0, max_value=100)
                          })
+else:
+    no_data_info("Coverage Trend Over Time", n=0, min_n=1)
 
 st.divider()
 
@@ -562,6 +579,8 @@ with dim_l:
                        font=dict(size=11, color="#8899bb"), x=0.01),
         )
         st.plotly_chart(t_fig, use_container_width=True)
+    else:
+        no_data_info("Coverage by Terminal", n=0, min_n=1)
 
 # By carrier
 with dim_r:
@@ -572,26 +591,31 @@ with dim_r:
                        .reset_index())
         carrier_grp = carrier_grp[carrier_grp["flights"] >= 50]  # at least 50 flights
         carrier_grp = carrier_grp.sort_values("coverage", ascending=False).head(12)
-        c_colors = ["#2ecc71" if v >= 99 else "#f39c12" if v > 50 else "#e74c3c"
-                    for v in carrier_grp["coverage"]]
-        c_fig = go.Figure(go.Bar(
-            x=carrier_grp["identification_carrierCode"],
-            y=carrier_grp["coverage"].round(1),
-            marker_color=c_colors, opacity=0.88,
-            text=[f"{v:.0f}%" for v in carrier_grp["coverage"]],
-            textposition="outside", textfont=dict(color=FC, size=10),
-        ))
-        c_fig.update_layout(
-            template=TEMPLATE, height=280,
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            xaxis=dict(title="Carrier Code"),
-            yaxis=dict(title="Avg Coverage (%)", range=[0, 115],
-                       gridcolor="rgba(255,255,255,0.04)"),
-            margin=dict(t=10, b=40, l=50, r=20),
-            title=dict(text="Avg Coverage by Carrier (min 50 flights)",
-                       font=dict(size=11, color="#8899bb"), x=0.01),
-        )
-        st.plotly_chart(c_fig, use_container_width=True)
+        if not carrier_grp.empty:
+            c_colors = ["#2ecc71" if v >= 99 else "#f39c12" if v > 50 else "#e74c3c"
+                        for v in carrier_grp["coverage"]]
+            c_fig = go.Figure(go.Bar(
+                x=carrier_grp["identification_carrierCode"],
+                y=carrier_grp["coverage"].round(1),
+                marker_color=c_colors, opacity=0.88,
+                text=[f"{v:.0f}%" for v in carrier_grp["coverage"]],
+                textposition="outside", textfont=dict(color=FC, size=10),
+            ))
+            c_fig.update_layout(
+                template=TEMPLATE, height=280,
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(title="Carrier Code"),
+                yaxis=dict(title="Avg Coverage (%)", range=[0, 115],
+                           gridcolor="rgba(255,255,255,0.04)"),
+                margin=dict(t=10, b=40, l=50, r=20),
+                title=dict(text="Avg Coverage by Carrier (min 50 flights)",
+                           font=dict(size=11, color="#8899bb"), x=0.01),
+            )
+            st.plotly_chart(c_fig, use_container_width=True)
+        else:
+            no_data_info("Coverage by Carrier", n=0, min_n=50)
+    else:
+        no_data_info("Coverage by Carrier", n=0, min_n=1)
 
 st.divider()
 
@@ -683,10 +707,11 @@ full_meta = quality_df[
     (quality_df["group"] == "Flight Metadata") &
     (quality_df["status"] == "full")
 ]
-recs.append(("🟢", "Strong Flight Metadata",
-             f"{len(full_meta)} core flight metadata columns are ≥99% complete "
-             "(flight number, carrier, aircraft, terminal, destination, scheduled departure). "
-             "All analysis dimensions are well-supported."))
+if len(full_meta) > 0:
+    recs.append(("🟢", "Strong Flight Metadata",
+                 f"{len(full_meta)} core flight metadata columns are ≥99% complete "
+                 "(flight number, carrier, aircraft, terminal, destination, scheduled departure). "
+                 "All analysis dimensions are well-supported."))
 
 active_full = quality_df[
     (quality_df["group"] == "Milestone Delay (Analysis)") &
